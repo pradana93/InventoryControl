@@ -97,17 +97,29 @@ export async function getMasterMap(): Promise<MasterMap> {
   for (const row of data) {
     if (!row[0] || !row[1]) continue; // Nomor Rak or NAMA BARANG empty
 
-    const rack = String(row[0]).trim();
-    const skuName = String(row[1]).trim();
+    const rack = String(row[0] || '').trim();
+    const rackSku = String(row[1] || '').trim();
     const qty = parseFloat(String(row[2] || '0')) || 0;
     const locationType = String(row[3] || '').trim();
-    const category = String(row[5] || '').trim(); // F
-    const unit = String(row[7] || '').trim(); // H
-    const barcode = String(row[8] || '').trim(); // I
+    const category = String(row[5] || '').trim(); // Column F
+    const catalogSku = String(row[6] || '').trim(); // Column G
+    const unit = String(row[7] || '').trim(); // Column H
+    const barcode = String(row[8] || '').trim(); // Column I
 
-    if (skuName && !bySku[skuName.toLowerCase()]) {
-      bySku[skuName.toLowerCase()] = {
-        skuName,
+    // Index by both catalogSku (Col G) and rackSku (Col B) so lookup never misses
+    const primarySku = catalogSku || rackSku;
+    if (primarySku && !bySku[primarySku.toLowerCase()]) {
+      bySku[primarySku.toLowerCase()] = {
+        skuName: primarySku,
+        category,
+        unit,
+        barcode,
+        locationType,
+      };
+    }
+    if (rackSku && !bySku[rackSku.toLowerCase()]) {
+      bySku[rackSku.toLowerCase()] = {
+        skuName: rackSku,
         category,
         unit,
         barcode,
@@ -115,7 +127,9 @@ export async function getMasterMap(): Promise<MasterMap> {
       };
     }
 
-    racks.push({ rack, skuName, qty, locationType });
+    if (rack) {
+      racks.push({ rack, skuName: rackSku, qty, locationType });
+    }
   }
 
   return { bySku, racks };
@@ -185,12 +199,26 @@ async function getInventoryLots(): Promise<InventoryLot[]> {
   ]);
 
   // Inventory: header row 3, data from row 4
+  // Actual columns:
+  // 0: Nama Barang (SKU Name)
+  // 1: Nomor Rak (Rack Code)
+  // 2: Kuantitas Sistem
+  // 3: Tanggal Inbound
+  // 4: Tanggal Kadaluarsa
+  // 5: Stok Aktual (SOH)
+  // 6: Variance
+  // 7: Akurasi Stock
+  // 8: Status FEFO
+  // 9: Urutan FEFO
+  // 10: Kunci FEFO
+  // 11: Stock Picking
   const data = inventoryRows.slice(3);
   const lots: InventoryLot[] = [];
 
   for (const row of data) {
-    const nomorRak = String(row[0] || '').trim();
-    const namaBarang = String(row[1] || '').trim();
+    // FIXED: Column A = Nama Barang (SKU), Column B = Nomor Rak (Rack)
+    const namaBarang = String(row[0] || '').trim();
+    const nomorRak = String(row[1] || '').trim();
     const qtySistem = parseFloat(String(row[2] || '0')) || 0;
     const tanggalInbound = String(row[3] || '').trim();
     const tanggalExpired = String(row[4] || '').trim();
@@ -200,9 +228,11 @@ async function getInventoryLots(): Promise<InventoryLot[]> {
     const statusFefo = String(row[8] || '').trim();
     const urutanFefo = parseInt(String(row[9] || '0'), 10) || 0;
     const stockPicking = parseFloat(String(row[10] || '0')) || 0;
-    const barcode = String(row[11] || '').trim();
-    const category = String(row[12] || '').trim();
-    const unit = String(row[13] || '').trim();
+    // Inventory sheet doesn't have barcode/category/unit - get from Master Data
+    const masterEntry = masterMap.bySku[namaBarang.toLowerCase()];
+    const barcode = masterEntry?.barcode || '';
+    const category = masterEntry?.category || '';
+    const unit = masterEntry?.unit || '';
 
     if (!nomorRak || !namaBarang) continue;
 
