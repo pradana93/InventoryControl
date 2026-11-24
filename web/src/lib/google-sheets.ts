@@ -1,0 +1,472 @@
+import { google, sheets_v4 } from 'googleapis';
+import { JWT } from 'google-auth-library';
+
+// Sheet names matching the original workbook
+export const SHEETS = {
+  DASHBOARD: 'Dasboard',
+  INVENTORY: 'Inventory',
+  MASTER: 'Master Data',
+  INBOUND: 'Inbound',
+  OUTBOUND: 'Outbound',
+  OUTB_REQ: 'Outbound Request',
+  PICKING: 'Picking List',
+} as const;
+
+// Inventory sheet layout (1-indexed, header row = 3, data starts row 4)
+const INV_HEADER_ROW = 3;
+const INV_FIRST_ROW = 4;
+
+let sheetsClient: sheets_v4.Sheets | null = null;
+
+export async function getSheetsClient(): Promise<sheets_v4.Sheets> {
+  if (sheetsClient) return sheetsClient;
+
+  const auth = new JWT({
+    email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+    key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+  });
+
+  sheetsClient = google.sheets({ version: 'v4', auth });
+  return sheetsClient;
+}
+
+export async function readSheet(sheetName: string, range?: string): Promise<string[][]> {
+  const client = await getSheetsClient();
+  const spreadsheetId = process.env.GOOGLE_SHEET_ID!;
+  const res = await client.spreadsheets.values.get({
+    spreadsheetId,
+    range: range || sheetName,
+  });
+  return res.data.values || [];
+}
+
+export async function appendRow(sheetName: string, values: (string | number)[]): Promise<void> {
+  const client = await getSheetsClient();
+  const spreadsheetId = process.env.GOOGLE_SHEET_ID!;
+  await client.spreadsheets.values.append({
+    spreadsheetId,
+    range: `${sheetName}!A:Z`,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: [values] },
+  });
+}
+
+export async function updateRange(sheetName: string, range: string, values: (string | number)[][]): Promise<void> {
+  const client = await getSheetsClient();
+  const spreadsheetId = process.env.GOOGLE_SHEET_ID!;
+  await client.spreadsheets.values.update({
+    spreadsheetId,
+    range: `${sheetName}!${range}`,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values },
+  });
+}
+
+// ============================================================================
+//  MASTER DATA HELPERS
+// ============================================================================
+
+export interface MasterSkuEntry {
+  skuName: string;
+  category: string;
+  unit: string;
+  barcode: string;
+  locationType: string;
+}
+
+export interface MasterRackEntry {
+  rack: string;
+  skuName: string;
+  qty: number;
+  locationType: string;
+}
+
+export interface MasterMap {
+  bySku: Record<string, MasterSkuEntry>;
+  racks: MasterRackEntry[];
+}
+
+async function getMasterMap(): Promise<MasterMap> {
+  const sh = await readSheet(SHEETS.MASTER);
+  // Header row 3, data from row 4
+  const data = sh.slice(3);
+  const bySku: Record<string, MasterSkuEntry> = {};
+  const racks: MasterRackEntry[] = [];
+
+  for (const row of data) {
+    if (!row[0] || !row[1]) continue; // Nomor Rak or NAMA BARANG empty
+
+    const rack = String(row[0]).trim();
+    const skuName = String(row[1]).trim();
+    const qty = parseFloat(String(row[2] || '0')) || 0;
+    const locationType = String(row[3] || '').trim();
+    const category = String(row[5] || '').trim(); // F
+    const unit = String(row[7] || '').trim(); // H
+    const barcode = String(row[8] || '').trim(); // I
+
+    if (skuName && !bySku[skuName.toLowerCase()]) {
+      bySku[skuName.toLowerCase()] = {
+        skuName,
+        category,
+        unit,
+        barcode,
+        locationType,
+      };
+    }
+
+    racks.push({ rack, skuName, qty, locationType });
+  }
+
+  return { bySku, racks };
+}
+
+export async function getSKUNames(): Promise<string[]> {
+  const master = await getMasterMap();
+  return Object.keys(master.bySku)
+    .map((k) => master.bySku[k].skuName)
+    .sort();
+}
+
+export async function getRackDetailsBySKU(skuName: string): Promise<{ rack: string; qtySistem: number }[]> {
+  const [master, inventory] = await Promise.all([
+    getMasterMap(),
+    getInventoryLots(),
+  ]);
+
+  const key = (skuName || '').toLowerCase();
+  const skuStock: Record<string, number> = {};
+
+  for (const lot of inventory) {
+    if (lot.namaBarang?.toLowerCase() === key) {
+      skuStock[lot.nomorRak] = (skuStock[lot.nomorRak] || 0) + lot.qtySistem;
+    }
+  }
+
+  const seen = new Set<string>();
+  const uniqueRacks = master.racks
+    .map((r) => r.rack)
+    .filter((r) => r && !seen.has(r) && seen.add(r))
+    .sort();
+
+  return uniqueRacks.map((rack) => ({
+    rack,
+    qtySistem: skuStock[rack] || 0,
+  }));
+}
+
+// ============================================================================
+//  INVENTORY LOTS (FEFO logic)
+// ============================================================================
+
+export interface InventoryLot {
+  nomorRak: string;
+  namaBarang: string;
+  qtySistem: number;
+  tanggalInbound: string;
+  tanggalExpired: string;
+  expiredLabel: string;
+  daysToExpiry: number;
+  soh: number;
+  variance: number;
+  akurasi: number;
+  statusFefo: string;
+  urutanFefo: number;
+  stockPicking: number;
+  barcode: string;
+  category: string;
+  unit: string;
+}
+
+async function getInventoryLots(): Promise<InventoryLot[]> {
+  const [inventoryRows, masterMap] = await Promise.all([
+    readSheet(SHEETS.INVENTORY),
+    getMasterMap(),
+  ]);
+
+  // Inventory: header row 3, data from row 4
+  const data = inventoryRows.slice(3);
+  const lots: InventoryLot[] = [];
+
+  for (const row of data) {
+    const nomorRak = String(row[0] || '').trim();
+    const namaBarang = String(row[1] || '').trim();
+    const qtySistem = parseFloat(String(row[2] || '0')) || 0;
+    const tanggalInbound = String(row[3] || '').trim();
+    const tanggalExpired = String(row[4] || '').trim();
+    const soh = parseFloat(String(row[5] || '0')) || 0;
+    const variance = parseFloat(String(row[6] || '0')) || 0;
+    const akurasi = parseFloat(String(row[7] || '0')) || 0;
+    const statusFefo = String(row[8] || '').trim();
+    const urutanFefo = parseInt(String(row[9] || '0'), 10) || 0;
+    const stockPicking = parseFloat(String(row[10] || '0')) || 0;
+    const barcode = String(row[11] || '').trim();
+    const category = String(row[12] || '').trim();
+    const unit = String(row[13] || '').trim();
+
+    if (!nomorRak || !namaBarang) continue;
+
+    // Calculate days to expiry
+    let daysToExpiry = 0;
+    if (tanggalExpired) {
+      const expDate = new Date(tanggalExpired + 'T00:00:00');
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      daysToExpiry = Math.round((expDate.getTime() - today.getTime()) / 86400000);
+    }
+
+    const expiredLabel = formatDateShort(tanggalExpired);
+
+    lots.push({
+      nomorRak,
+      namaBarang,
+      qtySistem,
+      tanggalInbound,
+      tanggalExpired,
+      expiredLabel,
+      daysToExpiry,
+      soh,
+      variance,
+      akurasi,
+      statusFefo,
+      urutanFefo,
+      stockPicking,
+      barcode,
+      category,
+      unit,
+    });
+  }
+
+  return lots;
+}
+
+function formatDateShort(iso: string): string {
+  if (!iso) return '-';
+  const d = new Date(iso + 'T00:00:00');
+  if (isNaN(d.getTime())) return iso;
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des'];
+  return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+export async function getFullDashboard() {
+  const lots = await getInventoryLots();
+
+  // Total SKU (unique namaBarang)
+  const uniqueSkus = new Set(lots.map((l) => l.namaBarang).filter(Boolean));
+  const totalSKU = uniqueSkus.size;
+
+  // Total system qty
+  const totalSystemQty = lots.reduce((sum, l) => sum + l.qtySistem, 0);
+
+  // Total SOH (actual)
+  const totalSOH = lots.reduce((sum, l) => sum + l.soh, 0);
+
+  // Variance & Accuracy
+  const variance = totalSystemQty - totalSOH;
+  const accuracy = totalSystemQty > 0 ? ((totalSOH / totalSystemQty) * 100) : 100;
+
+  // Expired lots
+  const expiredLots = lots.filter((l) => l.daysToExpiry < 0 && l.qtySistem > 0);
+  const expiringSoon = lots.filter((l) => l.daysToExpiry >= 0 && l.daysToExpiry <= 30 && l.qtySistem > 0);
+  const outOfStock = lots.filter((l) => l.qtySistem <= 0);
+
+  // Empty slots (racks with no stock)
+  const master = await getMasterMap();
+  const racksWithStock = new Set(lots.filter(l => l.qtySistem > 0).map(l => l.nomorRak));
+  const emptySlots = master.racks.filter(r => r.qty === 0 && !racksWithStock.has(r.rack)).length;
+
+  // Top 10 SKU by system qty
+  const skuTotals: Record<string, number> = {};
+  for (const lot of lots) {
+    skuTotals[lot.namaBarang] = (skuTotals[lot.namaBarang] || 0) + lot.qtySistem;
+  }
+  const topSkus = Object.entries(skuTotals)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([namaBarang, qty]) => ({ namaBarang, qty }));
+
+  // Zone distribution
+  const zoneMap: Record<string, number> = {};
+  for (const lot of lots) {
+    if (lot.nomorRak) {
+      const zone = lot.nomorRak.split('-')[0] || 'Unknown';
+      zoneMap[zone] = (zoneMap[zone] || 0) + lot.qtySistem;
+    }
+  }
+  const zoneDistribution = Object.entries(zoneMap)
+    .map(([zone, qty]) => ({ zone, qty }))
+    .sort((a, b) => b.qty - a.qty);
+
+  return {
+    summary: {
+      totalSKU,
+      totalSystemQty,
+      totalSOH,
+      variance,
+      accuracy: Math.round(accuracy * 10) / 10,
+      expiredCount: expiredLots.length,
+      expiringCount: expiringSoon.length,
+      outOfStockCount: outOfStock.length,
+      emptySlots,
+    },
+    alerts: {
+      expired: expiredLots.slice(0, 10).map((l) => ({
+        namaBarang: l.namaBarang,
+        nomorRak: l.nomorRak,
+        qty: l.qtySistem,
+        expiredDate: l.tanggalExpired,
+      })),
+      expiring: expiringSoon.slice(0, 10).map((l) => ({
+        namaBarang: l.namaBarang,
+        nomorRak: l.nomorRak,
+        qty: l.qtySistem,
+        expiredDate: l.tanggalExpired,
+        daysLeft: l.daysToExpiry,
+      })),
+      outOfStock: outOfStock.slice(0, 10).map((l) => l.namaBarang),
+    },
+    charts: {
+      topSkus,
+      zoneDistribution,
+    },
+    inventory: lots,
+  };
+}
+
+export async function getStockBySku(search?: string) {
+  const lots = await getInventoryLots();
+  const master = await getMasterMap();
+
+  // Group by SKU
+  const skuMap: Record<string, {
+    namaBarang: string;
+    category: string;
+    barcode: string;
+    unit: string;
+    totalQtySystem: number;
+    totalSoh: number;
+    rackCount: number;
+    earliestExpiry: string;
+    earliestExpiryDate: string;
+    statusFefo: string;
+    racks: string[];
+    moreRacks: number;
+  }> = {};
+
+  for (const lot of lots) {
+    if (search && !lot.namaBarang.toLowerCase().includes(search.toLowerCase())) continue;
+
+    const key = lot.namaBarang.toLowerCase();
+    if (!skuMap[key]) {
+      const masterEntry = master.bySku[key];
+      skuMap[key] = {
+        namaBarang: lot.namaBarang,
+        category: masterEntry?.category || '',
+        barcode: masterEntry?.barcode || lot.barcode,
+        unit: masterEntry?.unit || lot.unit,
+        totalQtySystem: 0,
+        totalSoh: 0,
+        rackCount: 0,
+        earliestExpiry: '9999-12-31',
+        earliestExpiryDate: '-',
+        statusFefo: 'OK',
+        racks: [],
+        moreRacks: 0,
+      };
+    }
+
+    const entry = skuMap[key];
+    entry.totalQtySystem += lot.qtySistem;
+    entry.totalSoh += lot.soh;
+    entry.rackCount++;
+    entry.racks.push(lot.nomorRak);
+
+    if (lot.tanggalExpired && lot.tanggalExpired < entry.earliestExpiry) {
+      entry.earliestExpiry = lot.tanggalExpired;
+      entry.earliestExpiryDate = formatDateShort(lot.tanggalExpired);
+    }
+
+    // Worst status wins
+    const statusOrder = { 'EXPIRED': 4, 'EXPIRED HARI INI': 3, 'HABIS': 2, 'OK': 1 };
+    if ((statusOrder[lot.statusFefo as keyof typeof statusOrder] || 0) > (statusOrder[entry.statusFefo as keyof typeof statusOrder] || 0)) {
+      entry.statusFefo = lot.statusFefo;
+    }
+  }
+
+  return Object.values(skuMap)
+    .map((s) => ({
+      ...s,
+      moreRacks: Math.max(0, s.racks.length - 3),
+      racks: s.racks.slice(0, 3),
+    }))
+    .sort((a, b) => a.namaBarang.localeCompare(b.namaBarang));
+}
+
+export async function getStockDetail(search?: string) {
+  const lots = await getInventoryLots();
+  return lots
+    .filter((l) => !search || l.namaBarang.toLowerCase().includes(search.toLowerCase()) || l.nomorRak.toLowerCase().includes(search.toLowerCase()))
+    .map((l) => ({
+      nomorRak: l.nomorRak,
+      namaBarang: l.namaBarang,
+      qtySistem: l.qtySistem,
+      soh: l.soh,
+      variance: l.variance,
+      akurasi: l.akurasi,
+      statusFefo: l.statusFefo,
+      urutanFefo: l.urutanFefo,
+      stockPicking: l.stockPicking,
+      tanggalInbound: l.tanggalInbound,
+      tanggalExpired: l.tanggalExpired,
+      expiredLabel: l.expiredLabel,
+      daysToExpiry: l.daysToExpiry,
+      barcode: l.barcode,
+      category: l.category,
+      unit: l.unit,
+    }))
+    .sort((a, b) => a.namaBarang.localeCompare(b.namaBarang) || a.nomorRak.localeCompare(b.nomorRak));
+}
+
+export async function submitInbound(data: {
+  barcode: string;
+  namaBarang: string;
+  totalQty: number;
+  tanggalInbound: string;
+  tanggalKadaluarsa: string;
+  nomorSJ: string;
+  rack1?: string; qtyRack1?: number;
+  rack2?: string; qtyRack2?: number;
+  rack3?: string; qtyRack3?: number;
+  rack4?: string; qtyRack4?: number;
+  rack5?: string; qtyRack5?: number;
+  rack6?: string; qtyRack6?: number;
+  remarks: string;
+}) {
+  const row = [
+    data.barcode || '',
+    data.namaBarang,
+    data.totalQty,
+    data.tanggalInbound,
+    data.tanggalKadaluarsa,
+    data.nomorSJ || '',
+    data.rack1 || '', data.qtyRack1 || 0,
+    data.rack2 || '', data.qtyRack2 || 0,
+    data.rack3 || '', data.qtyRack3 || 0,
+    data.rack4 || '', data.qtyRack4 || 0,
+    data.rack5 || '', data.qtyRack5 || 0,
+    data.rack6 || '', data.qtyRack6 || 0,
+    data.remarks || '',
+  ];
+
+  await appendRow(SHEETS.INBOUND, row);
+  return { success: true, message: 'Data inbound berhasil disimpan.' };
+}
+
+function _str(v: any): string {
+  return v === null || v === undefined ? '' : String(v);
+}
+
+function _num(v: any): number {
+  const n = Number(v);
+  return isNaN(n) ? 0 : n;
+}
