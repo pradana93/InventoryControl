@@ -279,31 +279,40 @@ function formatDateShort(iso: string): string {
 }
 
 export async function getFullDashboard() {
-  const lots = await getInventoryLots();
+  const [lots, master, dashboardSummary] = await Promise.all([
+    getInventoryLots(),
+    getMasterMap(),
+    getDashboardSummary(),
+  ]);
 
-  // Total SKU (unique namaBarang)
+  // Unique SKU names present in inventory
   const uniqueSkus = new Set(lots.map((l) => l.namaBarang).filter(Boolean));
   const totalSKU = uniqueSkus.size;
 
-  // Total system qty
+  // Total system qty (all rows)
   const totalSystemQty = lots.reduce((sum, l) => sum + l.qtySistem, 0);
 
-  // Total SOH (actual)
+  // Total SOH (only rows that have been opname'd, i.e. SOH is not blank/zero-filled)
   const totalSOH = lots.reduce((sum, l) => sum + l.soh, 0);
 
-  // Variance & Accuracy
-  const variance = totalSystemQty - totalSOH;
-  const accuracy = totalSystemQty > 0 ? ((totalSOH / totalSystemQty) * 100) : 100;
+  // Summary figures come from the Dasboard sheet, which computes variance and
+  // accuracy only over rows that were actually stock-opnamed. Recomputing from
+  // raw totals would wrongly include not-yet-counted rows.
+  const variance = dashboardSummary.totalVariance;
+  const accuracy = dashboardSummary.accuracy;
+  const outOfStockCount = dashboardSummary.outOfStockCount;
 
-  // Expired lots
-  const expiredLots = lots.filter((l) => l.daysToExpiry < 0 && l.qtySistem > 0);
-  const expiringSoon = lots.filter((l) => l.daysToExpiry >= 0 && l.daysToExpiry <= 30 && l.qtySistem > 0);
-  const outOfStock = lots.filter((l) => l.qtySistem <= 0);
+  // Expired lots (per FEFO status) — qty still on hand
+  const expiredLots = lots.filter(
+    (l) => (l.statusFefo === 'EXPIRED' || l.statusFefo === 'EXPIRED HARI INI') && l.qtySistem > 0
+  );
+  const expiringSoon = lots.filter(
+    (l) => l.daysToExpiry >= 0 && l.daysToExpiry <= 30 && l.qtySistem > 0 && l.statusFefo !== 'HABIS'
+  );
 
-  // Empty slots (racks with no stock)
-  const master = await getMasterMap();
-  const racksWithStock = new Set(lots.filter(l => l.qtySistem > 0).map(l => l.nomorRak));
-  const emptySlots = master.racks.filter(r => r.qty === 0 && !racksWithStock.has(r.rack)).length;
+  // Empty slots (racks with zero capacity assigned or no stock)
+  const racksWithStock = new Set(lots.filter((l) => l.qtySistem > 0).map((l) => l.nomorRak));
+  const emptySlots = master.racks.filter((r) => r.qty === 0 && !racksWithStock.has(r.rack)).length;
 
   // Top 10 SKU by system qty
   const skuTotals: Record<string, number> = {};
@@ -315,16 +324,16 @@ export async function getFullDashboard() {
     .slice(0, 10)
     .map(([namaBarang, qty]) => ({ namaBarang, qty }));
 
-  // Zone distribution
+  // Zone distribution — derived from rack code prefix (e.g. "A0101A" -> zone "A")
   const zoneMap: Record<string, number> = {};
   for (const lot of lots) {
     if (lot.nomorRak) {
-      const zone = lot.nomorRak.split('-')[0] || 'Unknown';
+      const zone = lot.nomorRak.replace(/[^A-Za-z].*$/, '') || lot.nomorRak[0];
       zoneMap[zone] = (zoneMap[zone] || 0) + lot.qtySistem;
     }
   }
   const zoneDistribution = Object.entries(zoneMap)
-    .map(([zone, qty]) => ({ zone, qty }))
+    .map(([zone, qty]) => ({ zone: `Zona ${zone}`, qty }))
     .sort((a, b) => b.qty - a.qty);
 
   return {
@@ -333,10 +342,10 @@ export async function getFullDashboard() {
       totalSystemQty,
       totalSOH,
       variance,
-      accuracy: Math.round(accuracy * 10) / 10,
+      accuracy,
       expiredCount: expiredLots.length,
       expiringCount: expiringSoon.length,
-      outOfStockCount: outOfStock.length,
+      outOfStockCount,
       emptySlots,
     },
     alerts: {
@@ -344,22 +353,69 @@ export async function getFullDashboard() {
         namaBarang: l.namaBarang,
         nomorRak: l.nomorRak,
         qty: l.qtySistem,
-        expiredDate: l.tanggalExpired,
+        expiredDate: l.expiredLabel,
       })),
       expiring: expiringSoon.slice(0, 10).map((l) => ({
         namaBarang: l.namaBarang,
         nomorRak: l.nomorRak,
         qty: l.qtySistem,
-        expiredDate: l.tanggalExpired,
+        expiredDate: l.expiredLabel,
         daysLeft: l.daysToExpiry,
       })),
-      outOfStock: outOfStock.slice(0, 10).map((l) => l.namaBarang),
+      outOfStock: lots.filter((l) => l.statusFefo === 'HABIS').slice(0, 10).map((l) => l.namaBarang),
     },
     charts: {
       topSkus,
       zoneDistribution,
     },
     inventory: lots,
+  };
+}
+
+// ============================================================================
+//  DASHBOARD SHEET SUMMARY (pre-computed by spreadsheet formulas)
+// ============================================================================
+
+interface DashboardSummary {
+  totalSKU: number;
+  totalSystemQty: number;
+  totalSOH: number;
+  totalVariance: number;
+  accuracy: number;
+  expiredCount: number;
+  expiredTodayCount: number;
+  outOfStockCount: number;
+}
+
+async function getDashboardSummary(): Promise<DashboardSummary> {
+  const rows = await readSheet(SHEETS.DASHBOARD);
+
+  const num = (v: string | undefined): number => {
+    if (!v) return 0;
+    // Handle Indonesian formats: "100,00%" -> 100, "1.234,5" -> 1234.5
+    const cleaned = String(v).trim().replace('%', '').replace(/\./g, '').replace(',', '.');
+    const n = parseFloat(cleaned);
+    return isNaN(n) ? 0 : n;
+  };
+
+  const find = (label: string): string | undefined => {
+    const row = rows.find((r) => String(r[0] || '').toLowerCase().includes(label.toLowerCase()));
+    return row?.[1];
+  };
+
+  const accuracyRaw = find('Rata-rata Akurasi');
+  const expiredCount = num(find('Lot Expired'));
+  const expiredTodayCount = num(find('Lot Expired Hari Ini'));
+
+  return {
+    totalSKU: num(find('Total SKU')),
+    totalSystemQty: num(find('Total Kuantitas Sistem')),
+    totalSOH: num(find('Total Stok Aktual')),
+    totalVariance: num(find('Total Variance')),
+    accuracy: num(accuracyRaw),
+    expiredCount: expiredCount + expiredTodayCount,
+    expiredTodayCount,
+    outOfStockCount: num(find('Lot stok habis')),
   };
 }
 
