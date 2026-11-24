@@ -54,38 +54,27 @@ export default function InboundForm() {
 
   // Load SKU List on mount
   useEffect(() => {
-    console.log('InboundForm: Mounted, starting loadSkus');
     // Set default tanggal inbound to today
     setTanggalInbound(new Date().toISOString().split('T')[0]);
 
     async function loadSkus() {
-      console.log('InboundForm: Starting loadSkus...');
       try {
-        console.log('InboundForm: Fetching /api/sku?action=names');
         const res = await fetch('/api/sku?action=names');
-        console.log('InboundForm: Fetch response:', res.status, res.ok);
         if (res.ok) {
           const data = await res.json();
-          console.log('InboundForm: SKU data received:', data ? (Array.isArray(data) ? data.length + ' items' : typeof data) : 'null');
           setSkuList(data);
           if (Array.isArray(data) && data.length > 0) {
-            console.log('InboundForm: Setting selectedSku to:', data[0]);
             setSelectedSku(data[0]);
           }
-        } else {
-          console.error('InboundForm: Fetch failed with status:', res.status);
         }
       } catch (err) {
-        console.error('InboundForm: Error in loadSkus:', err);
+        console.error('Failed to load SKUs:', err);
       } finally {
-        console.log('InboundForm: Finished loadSkus. Setting loadingSkus to false.');
         setLoadingSkus(false);
       }
     }
     loadSkus();
   }, []);
-
-  console.log('InboundForm render. loadingSkus:', loadingSkus, 'selectedSku:', selectedSku);
 
   // When SKU changes, load available racks & current stock
   useEffect(() => {
