@@ -58,23 +58,33 @@ export default function InboundPage() {
     setTanggalInbound(new Date().toISOString().split('T')[0]);
 
     async function loadSkus() {
+      console.log('Starting loadSkus...');
       try {
+        console.log('Fetching /api/sku?action=names');
         const res = await fetch('/api/sku?action=names');
+        console.log('Fetch response:', res.status, res.ok);
         if (res.ok) {
           const data = await res.json();
+          console.log('SKU data received:', data ? (Array.isArray(data) ? data.length + ' items' : typeof data) : 'null');
           setSkuList(data);
           if (Array.isArray(data) && data.length > 0) {
+            console.log('Setting selectedSku to:', data[0]);
             setSelectedSku(data[0]);
           }
+        } else {
+          console.error('Fetch failed with status:', res.status);
         }
       } catch (err) {
-        console.error('Failed to load SKUs:', err);
+        console.error('Error in loadSkus:', err);
       } finally {
+        console.log('Finished loadSkus. Setting loadingSkus to false.');
         setLoadingSkus(false);
       }
     }
     loadSkus();
   }, []);
+
+  console.log('InboundPage render. loadingSkus:', loadingSkus, 'selectedSku:', selectedSku);
 
   // When SKU changes, load available racks & current stock
   useEffect(() => {
