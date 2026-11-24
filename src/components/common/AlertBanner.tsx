@@ -27,7 +27,7 @@ export function AlertBanner({ expired, expiring, outOfStock }: AlertBannerProps)
   return (
     <div className="space-y-3 mb-6">
       {expired.length > 0 && (
-        <Card className="border-destructive/50 bg-destructive/5" variant="outline">
+        <Card className="border-destructive/50 bg-destructive/5">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 mb-3">
               <AlertTriangle className="h-5 w-5 text-destructive" />
@@ -57,7 +57,7 @@ export function AlertBanner({ expired, expiring, outOfStock }: AlertBannerProps)
       )}
 
       {expiring.length > 0 && (
-        <Card className="border-yellow-500/50 bg-yellow-500/5" variant="outline">
+        <Card className="border-yellow-500/50 bg-yellow-500/5">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 mb-3">
               <Clock className="h-5 w-5 text-yellow-600" />
@@ -73,7 +73,7 @@ export function AlertBanner({ expired, expiring, outOfStock }: AlertBannerProps)
                     <span>Rak: {item.nomorRak}</span>
                     <Badge variant="secondary" className="text-xs">{item.qty} qty</Badge>
                     {item.daysLeft !== undefined && (
-                      <Badge variant="outline" className="text-xs text-yellow-700 border-yellow-500 bg-yellow-50">
+                      <Badge className="text-xs text-yellow-700 border-yellow-500 bg-yellow-50">
                         {item.daysLeft} hari
                       </Badge>
                     )}
@@ -91,7 +91,7 @@ export function AlertBanner({ expired, expiring, outOfStock }: AlertBannerProps)
       )}
 
       {outOfStock.length > 0 && (
-        <Card className="border-muted/50 bg-muted/30" variant="outline">
+        <Card className="border-muted/50 bg-muted/30">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 mb-3">
               <PackageX className="h-5 w-5 text-muted-foreground" />
@@ -101,7 +101,7 @@ export function AlertBanner({ expired, expiring, outOfStock }: AlertBannerProps)
             </div>
             <div className="flex flex-wrap gap-2">
               {outOfStock.slice(0, 15).map((sku, i) => (
-                <Badge key={i} variant="outline" className="text-xs">
+                <Badge key={i} className="text-xs">
                   {sku}
                 </Badge>
               ))}

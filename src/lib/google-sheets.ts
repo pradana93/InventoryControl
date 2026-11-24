@@ -87,7 +87,7 @@ export interface MasterMap {
   racks: MasterRackEntry[];
 }
 
-async function getMasterMap(): Promise<MasterMap> {
+export async function getMasterMap(): Promise<MasterMap> {
   const sh = await readSheet(SHEETS.MASTER);
   // Header row 3, data from row 4
   const data = sh.slice(3);

@@ -35,9 +35,7 @@ export default function InboundPage() {
   const [selectedSku, setSelectedSku] = useState('');
   const [palletCode, setPalletCode] = useState('');
   const [nomorSJ, setNomorSJ] = useState('');
-  const [tanggalInbound, setTanggalInbound] = useState(
-    new Date().toISOString().split('T')[0]
-  );
+  const [tanggalInbound, setTanggalInbound] = useState('');
   const [tanggalExpired, setTanggalExpired] = useState('');
   const [remarks, setRemarks] = useState('');
 
@@ -56,6 +54,9 @@ export default function InboundPage() {
 
   // Load SKU List on mount
   useEffect(() => {
+    // Set default tanggal inbound to today
+    setTanggalInbound(new Date().toISOString().split('T')[0]);
+
     async function loadSkus() {
       try {
         const res = await fetch('/api/sku?action=names');

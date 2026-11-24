@@ -90,14 +90,14 @@ export function DashboardContent() {
     { 
       title: 'Variance', 
       value: (summary.variance >= 0 ? '+' : '') + summary.variance.toLocaleString(), 
-      trend: summary.variance === 0 ? 'neutral' : summary.variance > 0 ? 'up' : 'down',
+      trend: (summary.variance === 0 ? 'neutral' : summary.variance > 0 ? 'up' : 'down') as 'up' | 'down' | 'neutral',
       trendValue: Math.abs(summary.variance).toLocaleString(),
       icon: <TrendingUp className="h-8 w-8" />
     },
     { 
       title: 'Akurasi', 
       value: summary.accuracy.toFixed(1) + '%', 
-      trend: summary.accuracy >= 99 ? 'up' : summary.accuracy >= 95 ? 'neutral' : 'down',
+      trend: (summary.accuracy >= 99 ? 'up' : summary.accuracy >= 95 ? 'neutral' : 'down') as 'up' | 'down' | 'neutral',
       icon: <CheckCircle className="h-8 w-8" />
     },
     { title: 'Slot Kosong', value: summary.emptySlots.toLocaleString(), icon: <MinusCircle className="h-8 w-8" /> },

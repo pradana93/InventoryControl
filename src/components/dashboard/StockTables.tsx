@@ -50,8 +50,8 @@ interface StockTablesProps {
 export function StockTables({ skuData, detailData }: StockTablesProps) {
   const [skuSearch, setSkuSearch] = useState('');
   const [detailSearch, setDetailSearch] = useState('');
-  const [skuSort, setSkuSort] = useState<{ key: keyof StockBySku | ''; dir: 'asc' | 'desc' }>({ key: '', dir: 'asc' });
-  const [detailSort, setDetailSort] = useState<{ key: keyof StockDetail | ''; dir: 'asc' | 'desc' }>({ key: '', dir: 'asc' });
+  const [skuSort, setSkuSort] = useState<{ key: keyof StockBySku | null; dir: 'asc' | 'desc' }>({ key: null, dir: 'asc' });
+  const [detailSort, setDetailSort] = useState<{ key: keyof StockDetail | null; dir: 'asc' | 'desc' }>({ key: null, dir: 'asc' });
 
   const filteredSku = useMemo(() => {
     let result = skuData.filter((s) =>
@@ -61,9 +61,10 @@ export function StockTables({ skuData, detailData }: StockTablesProps) {
     );
 
     if (skuSort.key) {
+      const key = skuSort.key;
       result = [...result].sort((a, b) => {
-        const av = a[skuSort.key];
-        const bv = b[skuSort.key];
+        const av = a[key];
+        const bv = b[key];
         if (av === bv) return 0;
         const cmp = av > bv ? 1 : -1;
         return skuSort.dir === 'asc' ? cmp : -cmp;
@@ -80,9 +81,10 @@ export function StockTables({ skuData, detailData }: StockTablesProps) {
     );
 
     if (detailSort.key) {
+      const key = detailSort.key;
       result = [...result].sort((a, b) => {
-        const av = a[detailSort.key];
-        const bv = b[detailSort.key];
+        const av = a[key];
+        const bv = b[key];
         if (av === bv) return 0;
         const cmp = av > bv ? 1 : -1;
         return detailSort.dir === 'asc' ? cmp : -cmp;
@@ -115,16 +117,21 @@ export function StockTables({ skuData, detailData }: StockTablesProps) {
     return <Badge variant={variants[status] || 'outline'} className="text-xs">{status}</Badge>;
   };
 
-  const SortIcon = ({ key, currentSort, label }: { key: string; currentSort: typeof skuSort; label: string }) => (
+  const SortIcon = ({ sortKey, currentSort, label, onSort }: {
+    sortKey: string;
+    currentSort: typeof skuSort | typeof detailSort;
+    label: string;
+    onSort: (key: any) => void;
+  }) => (
     <button
-      onClick={() => key === 'sku' ? handleSkuSort(key as keyof StockBySku) : handleDetailSort(key as keyof StockDetail)}
+      onClick={() => onSort(sortKey)}
       className="flex items-center gap-1 hover:text-foreground transition-colors"
     >
       {label}
-      {currentSort.key === key && (
+      {currentSort.key === sortKey && (
         currentSort.dir === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
       )}
-      {currentSort.key !== key && <ChevronDown className="h-3 w-3 text-muted-foreground/50" />}
+      {currentSort.key !== sortKey && <ChevronDown className="h-3 w-3 text-muted-foreground/50" />}
     </button>
   );
 
@@ -148,21 +155,21 @@ export function StockTables({ skuData, detailData }: StockTablesProps) {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="cursor-pointer" onClick={() => handleSkuSort('namaBarang')}>
-                  <SortIcon key="sku" currentSort={skuSort} label="Nama Barang" />
+                <TableHead className="cursor-pointer">
+                  <SortIcon sortKey="namaBarang" currentSort={skuSort} label="Nama Barang" onSort={handleSkuSort} />
                 </TableHead>
-                <TableHead className="cursor-pointer" onClick={() => handleSkuSort('category')}>
-                  <SortIcon key="sku" currentSort={skuSort} label="Kategori" />
+                <TableHead className="cursor-pointer">
+                  <SortIcon sortKey="category" currentSort={skuSort} label="Kategori" onSort={handleSkuSort} />
                 </TableHead>
                 <TableHead>Barcode</TableHead>
-                <TableHead className="text-right cursor-pointer" onClick={() => handleSkuSort('totalQtySystem')}>
-                  <SortIcon key="sku" currentSort={skuSort} label="Qty Sistem" />
+                <TableHead className="text-right cursor-pointer">
+                  <SortIcon sortKey="totalQtySystem" currentSort={skuSort} label="Qty Sistem" onSort={handleSkuSort} />
                 </TableHead>
-                <TableHead className="text-right cursor-pointer" onClick={() => handleSkuSort('totalSoh')}>
-                  <SortIcon key="sku" currentSort={skuSort} label="SOH" />
+                <TableHead className="text-right cursor-pointer">
+                  <SortIcon sortKey="totalSoh" currentSort={skuSort} label="SOH" onSort={handleSkuSort} />
                 </TableHead>
-                <TableHead className="text-right cursor-pointer" onClick={() => handleSkuSort('rackCount')}>
-                  <SortIcon key="sku" currentSort={skuSort} label="Jml Rak" />
+                <TableHead className="text-right cursor-pointer">
+                  <SortIcon sortKey="rackCount" currentSort={skuSort} label="Jml Rak" onSort={handleSkuSort} />
                 </TableHead>
                 <TableHead>Kadaluarsa Terdekat</TableHead>
                 <TableHead>Status FEFO</TableHead>
@@ -211,18 +218,18 @@ export function StockTables({ skuData, detailData }: StockTablesProps) {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="cursor-pointer" onClick={() => handleDetailSort('nomorRak')}>
-                  <SortIcon key="detail" currentSort={detailSort} label="Rak" />
+                <TableHead className="cursor-pointer">
+                  <SortIcon sortKey="nomorRak" currentSort={detailSort} label="Rak" onSort={handleDetailSort} />
                 </TableHead>
-                <TableHead className="cursor-pointer" onClick={() => handleDetailSort('namaBarang')}>
-                  <SortIcon key="detail" currentSort={detailSort} label="Nama Barang" />
+                <TableHead className="cursor-pointer">
+                  <SortIcon sortKey="namaBarang" currentSort={detailSort} label="Nama Barang" onSort={handleDetailSort} />
                 </TableHead>
                 <TableHead>Kategori</TableHead>
-                <TableHead className="text-right cursor-pointer" onClick={() => handleDetailSort('qtySistem')}>
-                  <SortIcon key="detail" currentSort={detailSort} label="Qty Sistem" />
+                <TableHead className="text-right cursor-pointer">
+                  <SortIcon sortKey="qtySistem" currentSort={detailSort} label="Qty Sistem" onSort={handleDetailSort} />
                 </TableHead>
-                <TableHead className="text-right cursor-pointer" onClick={() => handleDetailSort('soh')}>
-                  <SortIcon key="detail" currentSort={detailSort} label="SOH" />
+                <TableHead className="text-right cursor-pointer">
+                  <SortIcon sortKey="soh" currentSort={detailSort} label="SOH" onSort={handleDetailSort} />
                 </TableHead>
                 <TableHead className="text-right">Variance</TableHead>
                 <TableHead className="text-right">Akurasi</TableHead>

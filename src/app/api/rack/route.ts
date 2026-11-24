@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getStockDetail, getMasterMap } from '@/lib/google-sheets';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
