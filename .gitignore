@@ -1,0 +1,44 @@
+# Google Apps Script files (keep in root)
+Code.gs
+Inbound.html
+Index.html
+PROJECT_PROGRESS.md
+R2 - INVENTORY & PICKING LIST MASTER BANGOR.xlsx
+
+# Next.js project files
+web/
+
+# Ignore Next.js output files
+web/.next/
+
+# Ignore dependency directories
+web/node_modules/
+
+# Ignore dotenv files
+web/.env*.local
+web/.env*.local.ts
+
+# Ignore Next.js files
+web/next.config.js
+web/next.config.mjs
+
+# Ignore production build output
+web/.next/build-manifest.json
+web/.next/build-output.json
+web/.next/cache/
+web/.next/build-cache/
+web/.next/prerender-manifest.json
+web/.next/react-loadable-manifest.json
+web/.next/server/pages/
+web/.next/server/app/
+web/.next/server/chunks/
+web/.next/server/middleware-manifest.json
+web/.next/server/next.config.js
+web/.next/server/pages-manifest.json
+web/.next/server/app-paths-manifest.json
+
+# Ignore VS Code settings
+web/.vscode/
+
+# Ignore macOS specific files
+.DS_Store
