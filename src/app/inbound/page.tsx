@@ -229,7 +229,7 @@ export default function InboundPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} suppressHydrationWarning>
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Informasi Barang</CardTitle>
@@ -269,6 +269,9 @@ export default function InboundPage() {
                       <SelectValue placeholder="Pilih Nama Barang" />
                     </SelectTrigger>
                     <SelectContent className="max-h-60">
+                      <SelectItem key="" value="" disabled>
+                        Pilih Nama Barang
+                      </SelectItem>
                       {skuList.map((sku) => (
                         <SelectItem key={sku} value={sku}>
                           {sku}
