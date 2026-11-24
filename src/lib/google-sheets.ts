@@ -285,9 +285,9 @@ export async function getFullDashboard() {
     getDashboardSummary(),
   ]);
 
-  // Unique SKU names present in inventory
+  // Unique SKU names present in inventory (or total items from Dasboard sheet)
   const uniqueSkus = new Set(lots.map((l) => l.namaBarang).filter(Boolean));
-  const totalSKU = uniqueSkus.size;
+  const totalSKU = dashboardSummary.totalSKU || uniqueSkus.size;
 
   // Total system qty (all rows)
   const totalSystemQty = lots.reduce((sum, l) => sum + l.qtySistem, 0);
