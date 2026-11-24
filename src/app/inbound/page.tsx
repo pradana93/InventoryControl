@@ -264,7 +264,7 @@ export default function InboundPage() {
                     <Loader2 className="h-4 w-4 animate-spin" /> Memuat daftar SKU...
                   </div>
                 ) : (
-                  <Select value={selectedSku} onValueChange={setSelectedSku}>
+                  <Select defaultValue={selectedSku} onValueChange={setSelectedSku}>
                     <SelectTrigger id="sku">
                       <SelectValue placeholder="Pilih Nama Barang" />
                     </SelectTrigger>
