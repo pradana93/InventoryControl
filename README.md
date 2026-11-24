@@ -94,7 +94,7 @@ Fill in your credentials:
 ```env
 GOOGLE_SERVICE_ACCOUNT_EMAIL="your-service-account@project.iam.gserviceaccount.com"
 GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwgg...\n-----END PRIVATE KEY-----\n"
-GOOGLE_SHEET_ID="1lBbcRlfhFplWSiKq-DJGsN3JpSuxhd0OWu0DHNNKXO8"
+GOOGLE_SHEET_ID="1WxJNJrvez9Du_IlyL1jhLQIn8haXBN-azFB0acOkRpw"
 ```
 
 ### 3. Run Development Server
