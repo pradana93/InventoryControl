@@ -63,6 +63,9 @@ export default function InboundPage() {
         if (res.ok) {
           const data = await res.json();
           setSkuList(data);
+          if (Array.isArray(data) && data.length > 0) {
+            setSelectedSku(data[0]);
+          }
         }
       } catch (err) {
         console.error('Failed to load SKUs:', err);
