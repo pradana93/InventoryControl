@@ -46,8 +46,8 @@ function LoginForm() {
       if (res?.error) {
         setError(ERROR_MESSAGES[res.error] || res.error);
       } else {
-        router.push(callbackUrl);
-        router.refresh();
+        // Use full browser navigation to ensure cookies and session state are committed
+        window.location.href = callbackUrl;
       }
     } catch (err: any) {
       setError(err?.message || ERROR_MESSAGES.Default);
