@@ -333,7 +333,10 @@ export async function getFullDashboard() {
     }
   }
   const zoneDistribution = Object.entries(zoneMap)
-    .map(([zone, qty]) => ({ zone: `Zona ${zone}`, qty }))
+    .map(([zone, qty]) => {
+      const cleanZone = zone.startsWith('Zona ') ? zone : zone.toLowerCase().includes('floor') ? zone : `Zona ${zone}`;
+      return { zone: cleanZone, qty };
+    })
     .sort((a, b) => b.qty - a.qty);
 
   return {
@@ -370,6 +373,27 @@ export async function getFullDashboard() {
     },
     inventory: lots,
   };
+}
+
+/**
+ * Lightweight lot feed for the FEFO timeline widget.
+ * Returns only lots that still hold stock, sorted by nearest expiry.
+ */
+export async function getFefoLots(limit = 50) {
+  const lots = await getInventoryLots();
+  return lots
+    .filter((l) => l.qtySistem > 0)
+    .sort((a, b) => a.daysToExpiry - b.daysToExpiry)
+    .slice(0, limit)
+    .map((l) => ({
+      namaBarang: l.namaBarang,
+      nomorRak: l.nomorRak,
+      qtySistem: l.qtySistem,
+      daysToExpiry: l.daysToExpiry,
+      expiredLabel: l.expiredLabel,
+      statusFefo: l.statusFefo,
+      category: l.category,
+    }));
 }
 
 // ============================================================================

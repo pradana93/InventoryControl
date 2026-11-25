@@ -1,17 +1,14 @@
-import { DashboardContent } from '@/components/dashboard/DashboardContent';
-import { DashboardTables } from '@/components/dashboard/DashboardTables';
+import { DashboardView } from '@/components/dashboard/DashboardView';
 
-export default function Dashboard() {
+export default function DashboardPage() {
   return (
-    <div className="min-h-screen bg-background">
-      <div className="container mx-auto px-4 py-6">
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold tracking-tight">Inventory Control</h1>
-          <p className="text-muted-foreground mt-1">Dashboard Inbound &amp; Stok Gudang</p>
+    <div className="min-h-screen bg-background px-4 py-6">
+      <div className="container mx-auto">
+        <div className="mb-6 flex flex-col gap-1">
+          <h1 className="text-3xl font-bold tracking-tight">Inventory Dashboard</h1>
+          <p className="text-muted-foreground text-base">Pantau stok gudang secara real-time</p>
         </div>
-
-        <DashboardContent />
-        <DashboardTables />
+        <DashboardView />
       </div>
     </div>
   );
