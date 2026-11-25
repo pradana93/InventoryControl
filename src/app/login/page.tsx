@@ -36,23 +36,16 @@ function LoginForm() {
     setError(null);
     setLoading(true);
 
-    try {
-      const res = await signIn('credentials', {
-        email,
-        password,
-        redirect: true,
-        callbackUrl,
-      });
-
-      if (res?.error) {
-        setError(ERROR_MESSAGES[res.error] || res.error);
-      }
-      // redirect: true handles navigation automatically
-    } catch (err: any) {
-      setError(err?.message || ERROR_MESSAGES.Default);
-    } finally {
-      setLoading(false);
-    }
+    // With redirect: true, signIn will navigate away on success,
+    // or redirect to login with error parameter on failure
+    await signIn('credentials', {
+      email,
+      password,
+      redirect: true,
+      callbackUrl,
+    });
+    // This code is never reached due to redirect
+    setLoading(false);
   };
 
   return (
