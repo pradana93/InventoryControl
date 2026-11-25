@@ -75,6 +75,7 @@ export interface CatalogEntry {
   satuan: string;
   kategori: string;
   status: string;
+  entitas: string;
   barcode: string;
 }
 
@@ -82,7 +83,7 @@ export async function getCatalog(): Promise<CatalogEntry[]> {
   const rows = await readSheet(SHEETS.CATALOG);
   if (rows.length <= 1) return [];
   
-  // Header: SKU_ID, Nama Barang, Satuan, Kategori, Status
+  // Header: SKU_ID, Nama Barang, Satuan, Kategori, Status, Entitas, Barcode
   return rows.slice(1)
     .filter(r => r[0] && r[1])
     .map((r, i) => ({
@@ -91,7 +92,8 @@ export async function getCatalog(): Promise<CatalogEntry[]> {
       satuan: String(r[2] || 'Pcs').trim(),
       kategori: String(r[3] || 'General').trim(),
       status: String(r[4] || 'Active').trim(),
-      barcode: String(r[5] || '').trim(),
+      entitas: String(r[5] || 'BBB').trim(), // Default to BBB for backward compat
+      barcode: String(r[6] || '').trim(),
     }));
 }
 

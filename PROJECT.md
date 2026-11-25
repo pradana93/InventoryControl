@@ -97,8 +97,8 @@ The system was **migrated from Google Apps Script (GAS)** to a full
 
 | Sheet | Purpose | Key columns |
 |-------|---------|-------------|
-| `Catalog` | SKU master | `SKU_ID`, `Nama_Barang`, `Kategori`, `Satuan`, `Barcode`, `Status` |
-| `Physical_Warehouse` | Rack master | `Rack_ID`, `Jenis_Lokasi` (zone), `Entitas`, `Status` |
+| `Catalog` | SKU master | `SKU_ID`, `Nama_Barang`, `Satuan`, `Kategori`, `Status`, `Entitas` (BBB/BBT), `Barcode` |
+| `Physical_Warehouse` | Rack master | `Rack_ID`, `Jenis_Lokasi` (zone), `Entitas` (BBB/BBT), `Status` |
 | `Ledger` | Stock movements (source of truth) | `Record_ID`, `Timestamp`, `SKU_Name`, `Rack_ID`, `Qty_In`, `Expired_Date`, `SJ_Number`, `Remarks` |
 | `Stock_Opname` | Manual physical counts | rack+SKU, `Qty_Fisik_SOH`, timestamp, variances |
 | `Rack_Labels` | QR label generator output | `Rack_ID`, label payload |
@@ -107,6 +107,21 @@ The system was **migrated from Google Apps Script (GAS)** to a full
 
 **Ledger convention:** `Qty_In` is **positive for inbound**, **negative for outbound**.
 True stock = sum of `Qty_In` per `SKU + Rack + Expiry` lot.
+
+### Two Entities: BBB & BBT
+The warehouse serves **two entities**, each with its own SKU catalog and its own
+racks, requiring **separate inventory control per entity**:
+
+| Entity | Rack range | SKU count |
+|--------|-----------|-----------|
+| **BBT** | `A0101*`–`A0112*`, `Floor-A*`, `C-A*`/`C-B*`, `FR1xx` | 30 SKUs |
+| **BBB** | `A0201*`–`A0212*`, `Floor B*`, `C-C*`/`C-D*`, `FR2xx` | 122 SKUs |
+
+- `Catalog.Entitas` tags every SKU as `BBB` or `BBT`. 21 SKU names exist in **both**
+  entities (e.g. `BBQ Sauce`, `Burger Bun`, `Kentang Goreng`) — these are **distinct
+  rows** with distinct `SKU_ID` prefixes (`BBB-###` vs `BBT-###`).
+- `Physical_Warehouse.Entitas` tags every rack.
+- `/api/sku` accepts an optional `entitas=BBB|BBT` filter and returns the entity.
 
 **Legacy sheets** (read-only, kept for backward compat): `Inventory`, `Inbound`,
 `Dasboard`, `Master Data`.
@@ -242,21 +257,27 @@ Auto-deploys to the aliased production URL `inventory-control-five.vercel.app`.
 - [x] **Super Admin User Management** (`/users`): list, create, edit role; role guide cards.
 - [x] NavBar "Pengguna" link (super-admin only).
 - [x] NextAuth type augmentation (`src/types/next-auth.d.ts`).
+- [x] **Entity (BBB/BBT) SKU catalog reset**: added `Entitas` column to `Catalog`,
+      replaced all rows from `SKU Vittoria BBB & BBT.xlsx` (122 BBB + 30 BBT = 152 rows,
+      21 overlapping names kept as distinct rows per entity).
+- [x] `/api/sku` supports `entitas=BBB|BBT` filtering and returns entity per SKU.
 
 ### 🔧 Known Issues / Follow-ups
 - [ ] Verify end-to-end outbound test after the `Picking_List` header reset
       (PDF → allocate → confirm with RO → export) — user to confirm Excel opens cleanly.
+- [ ] Update all UI pages (Dashboard, Inbound, Outbound, Opname) to filter by Entity.
 - [ ] PDF parser robustness across varied Accurate export layouts (ongoing).
 - [ ] Consider a "delete user" UI action (API `deleteUser` exists in `user-service.ts`
       but no button/route is wired up yet).
 - [ ] Consider password reset UI (API `updateUserPassword` exists, not exposed).
 
 ### ⏭️ Likely Next Steps
-1. Wire up (**optional**) user delete + password reset to the `/users` page.
-2. Add audit trail (who changed which role, when).
-3. Confirm the outbound Excel export is clean in a live test.
-4. Harden PDF parsing against additional Accurate templates.
-5. Review role granularity (e.g. operator access to `/outbound`).
+1. Update all UI pages (Dashboard, Inbound, Outbound, Opname) to filter by Entity. This is critical now that the catalog is split.
+2. Wire up (**optional**) user delete + password reset to the `/users` page.
+3. Add audit trail (who changed which role, when).
+4. Confirm the outbound Excel export is clean in a live test.
+5. Harden PDF parsing against additional Accurate templates.
+6. Review role granularity (e.g. operator access to `/outbound`).
 
 ---
 
