@@ -74,7 +74,8 @@ export const authOptions: any = {
     strategy: 'jwt',
     maxAge: 30 * 24 * 60 * 60,
   },
-  secret: process.env.NEXTAUTH_SECRET,
+  secret: process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET,
+  trustHost: true,
 };
 
 export const { handlers, auth, signIn, signOut } = NextAuth(authOptions);

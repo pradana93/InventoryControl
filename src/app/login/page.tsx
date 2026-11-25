@@ -9,14 +9,26 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Package, Lock, Mail, AlertCircle, Loader2 } from 'lucide-react';
 
+const ERROR_MESSAGES: Record<string, string> = {
+  Configuration:
+    'Konfigurasi server tidak lengkap. Hubungi Super Admin (NEXTAUTH_SECRET belum diatur).',
+  CredentialsSignin: 'Email atau kata sandi salah.',
+  AccessDenied: 'Akun ini tidak memiliki akses. Hubungi Super Admin.',
+  Verification: 'Tautan verifikasi tidak valid atau sudah kedaluwarsa.',
+  Default: 'Terjadi kesalahan sistem saat login.',
+};
+
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get('callbackUrl') || '/';
+  const urlError = searchParams.get('error');
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(
+    urlError ? ERROR_MESSAGES[urlError] || ERROR_MESSAGES.Default : null
+  );
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -32,13 +44,13 @@ function LoginForm() {
       });
 
       if (res?.error) {
-        setError(res.error);
+        setError(ERROR_MESSAGES[res.error] || res.error);
       } else {
         router.push(callbackUrl);
         router.refresh();
       }
     } catch (err: any) {
-      setError(err?.message || 'Terjadi kesalahan sistem saat login');
+      setError(err?.message || ERROR_MESSAGES.Default);
     } finally {
       setLoading(false);
     }
