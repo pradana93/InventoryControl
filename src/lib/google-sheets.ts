@@ -90,37 +90,28 @@ export interface MasterMap {
 
 export async function getMasterMap(): Promise<MasterMap> {
   const sh = await readSheet(SHEETS.MASTER);
-  // Header row 3, data from row 4
-  const data = sh.slice(3);
+  // Master Data layout (header at the row whose first cell is "Nomor Rak"):
+  //   A: Nomor Rak | B: Jenis Lokasi | C: Entitas | D: NAMA BARANG | E: Satuan
+  // Older layout used different columns, so resolve the header row dynamically.
+  const headerIdx = sh.findIndex((r) => String(r[0] || '').trim() === 'Nomor Rak');
+  const data = sh.slice(headerIdx >= 0 ? headerIdx + 1 : 3);
+
   const bySku: Record<string, MasterSkuEntry> = {};
   const racks: MasterRackEntry[] = [];
 
   for (const row of data) {
-    if (!row[0] || !row[1]) continue; // Nomor Rak or NAMA BARANG empty
-
     const rack = String(row[0] || '').trim();
-    const rackSku = String(row[1] || '').trim();
-    const qty = parseFloat(String(row[2] || '0')) || 0;
-    const locationType = String(row[3] || '').trim();
-    const category = String(row[5] || '').trim(); // Column F
-    const catalogSku = String(row[6] || '').trim(); // Column G
-    const unit = String(row[7] || '').trim(); // Column H
-    const barcode = String(row[8] || '').trim(); // Column I
+    const locationType = String(row[1] || '').trim(); // B: Jenis Lokasi
+    const sku = String(row[3] || '').trim();          // D: NAMA BARANG
+    const unit = String(row[4] || '').trim();         // E: Satuan
+    const category = String(row[5] || '').trim();     // F: Kategori (optional)
+    const barcode = String(row[6] || '').trim();      // G: Barcode (optional)
 
-    // Index by both catalogSku (Col G) and rackSku (Col B) so lookup never misses
-    const primarySku = catalogSku || rackSku;
-    if (primarySku && !bySku[primarySku.toLowerCase()]) {
-      bySku[primarySku.toLowerCase()] = {
-        skuName: primarySku,
-        category,
-        unit,
-        barcode,
-        locationType,
-      };
-    }
-    if (rackSku && !bySku[rackSku.toLowerCase()]) {
-      bySku[rackSku.toLowerCase()] = {
-        skuName: rackSku,
+    if (!rack || !sku) continue; // need both rack and SKU
+
+    if (sku && !bySku[sku.toLowerCase()]) {
+      bySku[sku.toLowerCase()] = {
+        skuName: sku,
         category,
         unit,
         barcode,
@@ -129,7 +120,7 @@ export async function getMasterMap(): Promise<MasterMap> {
     }
 
     if (rack) {
-      racks.push({ rack, skuName: rackSku, qty, locationType });
+      racks.push({ rack, skuName: sku, qty: 0, locationType });
     }
   }
 
@@ -399,10 +390,64 @@ export async function getFefoLots(limit = 50) {
     }));
 }
 
+/**
+ * Warehouse health & Master Data integrity report.
+ * Cross-checks Master Data (source of truth) against the Inventory sheet so
+ * drift is visible instead of silent.
+ */
+export async function getWarehouseHealth() {
+  const [lots, master] = await Promise.all([getInventoryLots(), getMasterMap()]);
+
+  const masterRacks = new Set(master.racks.map((r) => r.rack));
+  const invByRack = new Map(lots.map((l) => [l.nomorRak, l]));
+
+  // Racks defined in Master Data but missing / mismatched in Inventory
+  const missingInInventory: { rack: string; expectedSku: string }[] = [];
+  const skuMismatch: { rack: string; expectedSku: string; actualSku: string }[] = [];
+  for (const r of master.racks) {
+    const inv = invByRack.get(r.rack);
+    if (!inv) {
+      missingInInventory.push({ rack: r.rack, expectedSku: r.skuName });
+    } else if (inv.namaBarang.toLowerCase() !== r.skuName.toLowerCase()) {
+      skuMismatch.push({ rack: r.rack, expectedSku: r.skuName, actualSku: inv.namaBarang });
+    }
+  }
+
+  // Racks present in Inventory but not defined in Master Data
+  const orphanRacks = lots
+    .filter((l) => l.nomorRak && !masterRacks.has(l.nomorRak))
+    .map((l) => ({ rack: l.nomorRak, sku: l.namaBarang }));
+
+  const totalMasterRacks = master.racks.length;
+  const synced = master.racks.filter((r) => {
+    const inv = invByRack.get(r.rack);
+    return inv && inv.namaBarang.toLowerCase() === r.skuName.toLowerCase();
+  }).length;
+  const coverage = totalMasterRacks ? Math.round((synced / totalMasterRacks) * 100) : 100;
+
+  const racksWithStock = lots.filter((l) => l.qtySistem > 0).length;
+  const emptyRacks = totalMasterRacks - racksWithStock;
+
+  const issues = missingInInventory.length + skuMismatch.length + orphanRacks.length;
+
+  return {
+    totalMasterRacks,
+    inventoryRows: lots.length,
+    uniqueMasterSkus: Object.keys(master.bySku).length,
+    synced,
+    coverage,
+    issues,
+    emptyRacks,
+    racksWithStock,
+    missingInInventory: missingInInventory.slice(0, 25),
+    skuMismatch: skuMismatch.slice(0, 25),
+    orphanRacks: orphanRacks.slice(0, 25),
+  };
+}
+
 // ============================================================================
 //  DASHBOARD SHEET SUMMARY (pre-computed by spreadsheet formulas)
 // ============================================================================
-
 interface DashboardSummary {
   totalSKU: number;
   totalSystemQty: number;
