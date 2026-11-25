@@ -1,23 +1,29 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { Suspense } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Loader2, Save, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { Loader2, Save, RefreshCw, CheckCircle2, Globe } from 'lucide-react';
+import { useEntity } from '@/hooks/useEntity';
+import { ENTITY_COLORS } from '@/lib/constants';
 
-export default function StockOpnamePage() {
+function StockOpnamePageContent() {
+  const { entity, badge } = useEntity();
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [message, setMessage] = useState<string | null>(null);
 
+  const entityLabel = entity === 'ALL' ? 'Semua Entitas' : entity;
 
   async function loadData() {
     setLoading(true);
     try {
-      const res = await fetch('/api/stock-opname?action=list');
+      const ent = entity === 'ALL' ? '' : entity;
+      const res = await fetch(`/api/stock-opname?action=list${ent ? `&ent=${ent}` : ''}`);
       if (res.ok) setData(await res.json());
     } catch (e) {
       console.error('Failed to load', e);
@@ -26,7 +32,7 @@ export default function StockOpnamePage() {
     }
   }
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(); }, [entity]);
 
   async function handleSave(rackId: string, skuName: string, soh: number) {
     setSaving({ ...saving, [`${rackId}-${skuName}`]: true });
@@ -65,15 +71,20 @@ export default function StockOpnamePage() {
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center flex-wrap gap-2">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Stock Opname (Cycle Count)</h1>
           <p className="text-sm text-muted-foreground">Input stok fisik (SOH) per rack/pallet untuk perbandingan sistem vs fisik.</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={handleSync} disabled={loading}>
-            <RefreshCw className="mr-2 h-4 w-4" /> Sinkron Sistem
-          </Button>
+        <div className="flex items-center gap-2">
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={handleSync} disabled={loading}>
+              <RefreshCw className="mr-2 h-4 w-4" /> Sinkron Sistem
+            </Button>
+          </div>
+          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${badge.badge}`}>
+            <Globe className="h-3 w-3 mr-1" /> {entityLabel}
+          </span>
         </div>
       </div>
 
@@ -84,7 +95,7 @@ export default function StockOpnamePage() {
         </div>
       )}
 
-      <Card>
+      <Card className={ENTITY_COLORS[entity].bg}>
         <CardHeader>
           <CardTitle>Daftar Rak & Kuantitas</CardTitle>
         </CardHeader>
@@ -140,5 +151,13 @@ export default function StockOpnamePage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function StockOpnamePage() {
+  return (
+    <Suspense fallback={<div className="p-6"><div className="container mx-auto"><p className="text-muted-foreground">Memuat Stock Opname…</p></div></div>}>
+      <StockOpnamePageContent />
+    </Suspense>
   );
 }

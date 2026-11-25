@@ -22,3 +22,14 @@ Task 3: complete (commit d650dce, verify: npm run build → PASS)
   - LedgerEntry now includes entitas
   - InboundForm: uses useEntity(), filters SKUs/racks by entity, shows entity badge, sends entitas in payload
   - /inbound/page.tsx wrapped in Suspense
+
+Task 4: complete (commit bc7ba41, 7ec0542, verify: npm run build → PASS)
+  - /api/outbound/allocate/route.ts: filters warehouse+ledger by entitas, validates entity
+  - /api/outbound/confirm/route.ts: validates rack entities, writes entitas to Ledger + Picking_List
+  - /app/outbound/page.tsx: 
+    * detectEntityFromPdf() using PT_PATTERNS from constants
+    * entity modal shown if ALL selected or PDF doesn't match
+    * SKU fuzzy match uses /api/sku?action=names&ent=entity
+    * Allocation + Confirm include entitas in body
+    * Entity badge + detected badge shown in header
+    * Wrapped in Suspense
