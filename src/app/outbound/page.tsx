@@ -378,7 +378,7 @@ export default function OutboundPage() {
 
             <div className="flex items-center justify-between">
               <p className="text-sm text-muted-foreground">
-                {confirmed.allocations.length} pick points &middot; Total Qty: <span className="font-bold text-foreground">{totalQty}</span>
+                {confirmed.allocations.length} pick points &middot; Total Qty: <span className="font-bold text-foreground">{confirmed.allocations.reduce((s, a) => s + a.qtyAllocated, 0)}</span>
               </p>
               <p className="text-sm text-muted-foreground">{confirmed.ledgerEntries} entri Ledger tercatat</p>
             </div>
