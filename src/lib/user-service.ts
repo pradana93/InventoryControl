@@ -126,20 +126,12 @@ export async function authenticateUser(
   email: string,
   plainPassword: string
 ): Promise<{ user: UserRecord } | null> {
-  console.log(`[auth-debug] authenticateUser called for email: ${email}`);
   await ensureUsersSheet();
   const users = await getAllUsersInternal();
-  console.log(`[auth-debug] Total users found: ${users.length}`);
-  users.forEach((u, i) => console.log(`[auth-debug] User[${i}]: email=${u.email}, hashLen=${u.passwordHash?.length}`));
-
   const found = users.find((u) => u.email.toLowerCase() === email.toLowerCase().trim());
-  if (!found) {
-    console.log(`[auth-debug] User not found for email: ${email}`);
-    return null;
-  }
+  if (!found) return null;
 
   const match = await bcrypt.compare(plainPassword, found.passwordHash);
-  console.log(`[auth-debug] Password match result: ${match}`);
   if (!match) return null;
 
   return {

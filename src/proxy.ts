@@ -15,16 +15,20 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Check auth token
-  const token = await getToken({ 
-    req: request, 
-    secret: process.env.NEXTAUTH_SECRET 
+  // Check auth token. The cookie name must match the one configured in auth.ts
+  // (NextAuth v5 defaults to a secure-prefixed cookie in production).
+  const isProduction = process.env.NODE_ENV === 'production';
+  const token = await getToken({
+    req: request,
+    secret: process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET,
+    secureCookie: isProduction,
+    cookieName: isProduction ? '__Secure-authjs.session-token' : 'authjs.session-token',
   });
 
   // Not logged in -> redirect to login
   if (!token) {
     const url = new URL('/login', request.url);
-    url.searchParams.set('callbackUrl', encodeURIComponent(pathname));
+    url.searchParams.set('callbackUrl', pathname);
     return NextResponse.redirect(url);
   }
 

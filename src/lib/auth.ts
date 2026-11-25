@@ -17,7 +17,6 @@ export const authOptions: any = {
         password: { label: 'Password', type: 'password' },
       },
       async authorize(credentials: any) {
-        console.log('[auth-debug] authorize called with:', { email: credentials?.email, hasPassword: !!credentials?.password });
         const email = credentials?.email?.toLowerCase().trim();
         const password = credentials?.password;
 
