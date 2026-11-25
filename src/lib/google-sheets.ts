@@ -9,6 +9,7 @@ export const SHEETS = {
   WAREHOUSE: 'Physical_Warehouse',
   LEDGER: 'Ledger',
   STOCK_OPNAME: 'Stock_Opname',
+  RACK_LABELS: 'Rack_Labels',
   USERS: 'Users',
   // Legacy sheets kept for backward compatibility (read-only)
   LEGACY_INVENTORY: 'Inventory',
@@ -140,6 +141,52 @@ export async function getActiveRacks(): Promise<WarehouseRack[]> {
   return warehouse.filter(r => r.status === 'Active');
 }
 
+export interface RackDetail {
+  rackId: string;
+  jenisLokasi: string;
+  entitas: string;
+  currentSku: string;
+  currentQty: number;
+  expiredDate: string;
+  expiredLabel: string;
+  daysToExpiry: number;
+  skuBarcode: string;
+}
+
+export async function getRackDetail(rackId: string): Promise<RackDetail | null> {
+  const [warehouse, ledger, catalog] = await Promise.all([
+    getWarehouse(),
+    getLedger(),
+    getCatalog(),
+  ]);
+
+  const rack = warehouse.find(w => w.rackId === rackId);
+  if (!rack) return null;
+
+  // Find latest ledger entries for this rack
+  const rackEntries = ledger
+    .filter(l => l.rackId === rackId && l.qtyIn > 0)
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+  const currentSku = rackEntries[0]?.skuName || '-';
+  const totalQty = rackEntries.reduce((sum, l) => sum + l.qtyIn, 0);
+  const latestExpiry = rackEntries[0]?.expiredDate || '';
+  
+  const skuEntry = catalog.find(c => c.namaBarang.toLowerCase() === currentSku.toLowerCase());
+
+  return {
+    rackId,
+    jenisLokasi: rack.jenisLokasi,
+    entitas: rack.entitas,
+    currentSku,
+    currentQty: totalQty,
+    expiredDate: latestExpiry,
+    expiredLabel: formatDateShort(latestExpiry),
+    daysToExpiry: calculateDaysToExpiry(latestExpiry),
+    skuBarcode: skuEntry?.barcode || '',
+  };
+}
+
 export function getZoneLabels(): Record<string, string> {
   return {
     'RACKING': 'Zona Racking',
@@ -147,6 +194,49 @@ export function getZoneLabels(): Record<string, string> {
     'CONTAINER': 'Zona Container',
     'FREEZER': 'Zona Freezer',
   };
+}
+
+export interface RackLabel {
+  rackId: string;
+  skuName: string;
+  jenisLokasi: string;
+  barcode: string;
+  qrUrl: string;
+}
+
+/**
+ * Reads the Rack_Labels sheet (the label reference). The sheet is laid out as a
+ * two-column print grid: left half A:F, right half I:N. Each row holds up to two
+ * label records.
+ */
+export async function getRackLabels(): Promise<RackLabel[]> {
+  const rows = await readSheet(SHEETS.RACK_LABELS, `${SHEETS.RACK_LABELS}!A2:N400`);
+  const labels: RackLabel[] = [];
+
+  for (const row of rows) {
+    // Left label: A=Pallet, B=SKU, C=Zone, D=Barcode, E=QR Url
+    if (row[0] && String(row[0]).trim()) {
+      labels.push({
+        rackId: String(row[0]).trim(),
+        skuName: String(row[1] || '-').trim(),
+        jenisLokasi: String(row[2] || 'RACKING').trim(),
+        barcode: String(row[3] || '').trim(),
+        qrUrl: String(row[4] || '').trim(),
+      });
+    }
+    // Right label: I=Pallet, J=SKU, K=Zone, L=Barcode, M=QR Url
+    if (row[8] && String(row[8]).trim()) {
+      labels.push({
+        rackId: String(row[8]).trim(),
+        skuName: String(row[9] || '-').trim(),
+        jenisLokasi: String(row[10] || 'RACKING').trim(),
+        barcode: String(row[11] || '').trim(),
+        qrUrl: String(row[12] || '').trim(),
+      });
+    }
+  }
+
+  return labels.sort((a, b) => a.rackId.localeCompare(b.rackId));
 }
 
 // ============================================================================

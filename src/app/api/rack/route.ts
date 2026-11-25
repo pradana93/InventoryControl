@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getStockDetail, getMasterMap } from '@/lib/google-sheets';
+import { getStockDetail, getMasterMap, getRackLabels } from '@/lib/google-sheets';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +17,10 @@ export async function GET(request: Request) {
       case 'master':
         const master = await getMasterMap();
         return NextResponse.json(master);
+
+      case 'labels':
+        const labels = await getRackLabels();
+        return NextResponse.json(labels);
       
       default:
         return NextResponse.json({ error: 'Invalid action' }, { status: 400 });

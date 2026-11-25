@@ -13,6 +13,7 @@ export default function StockOpnamePage() {
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [message, setMessage] = useState<string | null>(null);
 
+
   async function loadData() {
     setLoading(true);
     try {

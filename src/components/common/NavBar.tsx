@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useSession, signOut } from 'next-auth/react';
-import { Package, PlusCircle, LayoutDashboard, LogOut, ChevronDown, UserCircle2, ClipboardCheck } from 'lucide-react';
+import { Package, PlusCircle, LayoutDashboard, LogOut, ChevronDown, UserCircle2, ClipboardCheck, QrCode } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState, useRef, useEffect } from 'react';
 
@@ -40,6 +40,7 @@ export function NavBar() {
     { href: '/', icon: LayoutDashboard, label: 'Dashboard', roles: ['super-admin', 'manager', 'operator'] },
     { href: '/inbound', icon: PlusCircle, label: 'Inbound', roles: ['super-admin', 'manager'] },
     { href: '/opname', icon: ClipboardCheck, label: 'Stock Opname', roles: ['super-admin', 'manager', 'operator'] },
+    { href: '/labels', icon: QrCode, label: 'Label Rak', roles: ['super-admin', 'manager'] },
   ].filter((item) => !role || item.roles.includes(role));
 
   return (
