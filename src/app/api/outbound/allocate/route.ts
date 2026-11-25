@@ -1,0 +1,145 @@
+import { NextResponse } from 'next/server';
+import { getLedger, getWarehouse, getCatalog, appendRow } from '@/lib/google-sheets';
+
+export const dynamic = 'force-dynamic';
+
+/**
+ * FEFO Allocation + Rack Sequencing Engine
+ * 
+ * Input: { lines: [{ skuName, qtyOrdered, matchedSkuId }] }
+ * Output: { allocations: [{ rackId, skuName, qtyAllocated, expiredDate, zone, sequence }] }
+ */
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+    const lines = body.lines || [];
+
+    if (!lines.length) {
+      return NextResponse.json({ error: 'Tidak ada baris untuk dialokasikan' }, { status: 400 });
+    }
+
+    // Fetch all data
+    const [ledger, warehouse, catalog] = await Promise.all([
+      getLedger(),
+      getWarehouse(),
+      getCatalog(),
+    ]);
+
+    // Build active stock by SKU + Rack + Expiry (FEFO)
+    // Only lots with qtyIn > 0 (stock on hand)
+    const stockLots = ledger
+      .filter(l => l.qtyIn > 0)
+      .map(l => {
+        // Find current remaining qty (could be reduced by previous outbound)
+        // For now, assume all ledger qtyIn is available (simplified)
+        return {
+          rackId: l.rackId,
+          skuName: l.skuName,
+          qty: l.qtyIn,
+          expiredDate: l.expiredDate,
+          expiredLabel: formatDateShort(l.expiredDate),
+        };
+      });
+
+    // Aggregate by SKU -> Rack -> Expiry
+    const skuRackExpiry = new Map<string, Array<{
+      rackId: string;
+      qty: number;
+      expiredDate: string;
+      expiredLabel: string;
+    }>>();
+
+    for (const lot of stockLots) {
+      const key = lot.skuName.toLowerCase();
+      if (!skuRackExpiry.has(key)) skuRackExpiry.set(key, []);
+      skuRackExpiry.get(key)!.push({
+        rackId: lot.rackId,
+        qty: lot.qty,
+        expiredDate: lot.expiredDate,
+        expiredLabel: lot.expiredLabel,
+      });
+    }
+
+    // Sort each SKU's lots by expiry ASC (FEFO)
+    for (const lots of skuRackExpiry.values()) {
+      lots.sort((a, b) => (a.expiredDate || '').localeCompare(b.expiredDate || ''));
+    }
+
+    // Zone ordering for rack sequencing
+    const zoneOrder: Record<string, number> = {
+      'RACKING': 1,
+      'FLOOR': 2,
+      'CONTAINER': 3,
+      'FREEZER': 4,
+    };
+
+    // Warehouse map for zone lookup
+    const warehouseMap = new Map(warehouse.map(w => [w.rackId, w.jenisLokasi]));
+
+    const allocations = [];
+    let globalSequence = 1;
+
+    // Process each requested line
+    for (const line of lines) {
+      const skuKey = line.skuName.toLowerCase();
+      const availableLots = skuRackExpiry.get(skuKey) || [];
+      let remaining = line.qtyOrdered;
+
+      if (availableLots.length === 0) {
+        console.warn(`No stock for SKU: ${line.skuName}`);
+        continue;
+      }
+
+      // Allocate from earliest expiry first
+      for (const lot of availableLots) {
+        if (remaining <= 0) break;
+        const take = Math.min(remaining, lot.qty);
+        
+        if (take > 0) {
+          allocations.push({
+            rackId: lot.rackId,
+            skuName: line.skuName,
+            qtyAllocated: take,
+            expiredDate: lot.expiredDate,
+            expiredLabel: lot.expiredLabel,
+            zone: warehouseMap.get(lot.rackId) || 'UNKNOWN',
+            sequence: globalSequence++,
+          });
+          lot.qty -= take;
+          remaining -= take;
+        }
+      }
+
+      if (remaining > 0) {
+        console.warn(`Partial allocation for ${line.skuName}: short by ${remaining}`);
+      }
+    }
+
+    // Sort allocations by zone order, then rack ID (picking path)
+    allocations.sort((a, b) => {
+      const zoneA = zoneOrder[a.zone] || 99;
+      const zoneB = zoneOrder[b.zone] || 99;
+      if (zoneA !== zoneB) return zoneA - zoneB;
+      return a.rackId.localeCompare(b.rackId);
+    });
+
+    // Re-number sequence after sorting
+    allocations.forEach((a, i) => { a.sequence = i + 1; });
+
+    return NextResponse.json({ allocations });
+  } catch (error) {
+    console.error('Allocation error:', error);
+    return NextResponse.json(
+      { error: 'Gagal alokasi', detail: error instanceof Error ? error.message : String(error) },
+      { status: 500 }
+    );
+  }
+}
+
+function formatDateShort(iso: string): string {
+  if (!iso) return '-';
+  const d = new Date(iso + 'T00:00:00');
+  if (isNaN(d.getTime())) return iso;
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des'];
+  return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+}
