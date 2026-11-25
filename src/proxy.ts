@@ -16,6 +16,10 @@ export async function proxy(request: NextRequest) {
                    pathname.startsWith('/_next') || 
                    pathname === '/favicon.ico';
 
+  // Super Admin only paths (require auth + super-admin role)
+  const isSuperAdminOnly = pathname.startsWith('/users') || 
+                           pathname.startsWith('/api/users');
+
   if (isPublic) {
     return NextResponse.next();
   }
@@ -38,6 +42,14 @@ export async function proxy(request: NextRequest) {
   }
 
   const role = token.role as string;
+
+  // Super Admin only paths
+  if (isSuperAdminOnly) {
+    if (role !== 'super-admin') {
+      return NextResponse.redirect(new URL('/', request.url));
+    }
+    return NextResponse.next();
+  }
 
   // Protect Inbound page (Only Super Admin and Manager). Scan pages are public (handled above).
   if (pathname.startsWith('/inbound') && !pathname.startsWith('/inbound/scan')) {

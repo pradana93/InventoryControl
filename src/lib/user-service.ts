@@ -239,6 +239,48 @@ export async function deleteUser(email: string): Promise<{ success: boolean; mes
 }
 
 /**
+ * Updates a user's role (Super Admin only)
+ */
+export async function updateUserRole(
+  email: string,
+  newRole: 'super-admin' | 'manager' | 'operator'
+): Promise<{ success: boolean; message?: string }> {
+  await ensureUsersSheet();
+  const client = await getSheetsClient();
+  const spreadsheetId = process.env.GOOGLE_SHEET_ID!;
+  const cleanEmail = email.toLowerCase().trim();
+
+  const rows = await readSheet(SHEETS.USERS);
+  let targetRowIndex = -1;
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0] || '').toLowerCase().trim() === cleanEmail) {
+      targetRowIndex = i + 1;
+      break;
+    }
+  }
+
+  if (targetRowIndex === -1) {
+    return { success: false, message: 'Pengguna tidak ditemukan.' };
+  }
+
+  // Prevent changing main Super Admin role
+  if (cleanEmail === SUPER_ADMIN_EMAIL.toLowerCase()) {
+    return { success: false, message: 'Role Super Admin utama tidak dapat diubah.' };
+  }
+
+  await client.spreadsheets.values.update({
+    spreadsheetId,
+    range: `${SHEETS.USERS}!D${targetRowIndex}`,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: {
+      values: [[newRole]],
+    },
+  });
+
+  return { success: true };
+}
+
+/**
  * Resets or updates a user's password
  */
 export async function updateUserPassword(
