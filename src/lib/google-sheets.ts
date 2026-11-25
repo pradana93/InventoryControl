@@ -10,6 +10,7 @@ export const SHEETS = {
   OUTBOUND: 'Outbound',
   OUTB_REQ: 'Outbound Request',
   PICKING: 'Picking List',
+  USERS: 'Users',
 } as const;
 
 // Inventory sheet layout (1-indexed, header row = 3, data starts row 4)
