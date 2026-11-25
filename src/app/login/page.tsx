@@ -40,15 +40,14 @@ function LoginForm() {
       const res = await signIn('credentials', {
         email,
         password,
-        redirect: false,
+        redirect: true,
+        callbackUrl,
       });
 
       if (res?.error) {
         setError(ERROR_MESSAGES[res.error] || res.error);
-      } else {
-        // Use full browser navigation to ensure cookies and session state are committed
-        window.location.href = callbackUrl;
       }
+      // redirect: true handles navigation automatically
     } catch (err: any) {
       setError(err?.message || ERROR_MESSAGES.Default);
     } finally {
