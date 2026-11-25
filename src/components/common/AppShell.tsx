@@ -1,5 +1,6 @@
 'use client';
 
+import { Suspense } from 'react';
 import { usePathname } from 'next/navigation';
 import { NavBar } from '@/components/common/NavBar';
 
@@ -10,7 +11,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      {!isLogin && <NavBar />}
+      {!isLogin && (
+        <Suspense fallback={<div className="h-[56px] bg-primary" />}>
+          <NavBar />
+        </Suspense>
+      )}
       <main className="flex-1">{children}</main>
     </>
   );

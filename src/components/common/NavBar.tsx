@@ -3,9 +3,11 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useSession, signOut } from 'next-auth/react';
-import { Package, PlusCircle, LayoutDashboard, LogOut, ChevronDown, UserCircle2, ClipboardCheck, QrCode, Users } from 'lucide-react';
+import { Package, PlusCircle, LayoutDashboard, LogOut, ChevronDown, UserCircle2, ClipboardCheck, QrCode, Users, Globe } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState, useRef, useEffect } from 'react';
+import { useEntity } from '@/hooks/useEntity';
+import { ENTITY_OPTIONS, ENTITY_COLORS } from '@/lib/constants';
 
 const ROLE_LABELS: Record<string, string> = {
   'super-admin': 'Super Admin',
@@ -23,13 +25,20 @@ export function NavBar() {
   const pathname = usePathname();
   const { data: session, status } = useSession();
   const role = (session?.user as any)?.role as string | undefined;
+  const { entity, setEntity, options } = useEntity();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [entityMenuOpen, setEntityMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const entityMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (menuRef.current && !menuRef.current.contains(target)) {
         setMenuOpen(false);
+      }
+      if (entityMenuRef.current && !entityMenuRef.current.contains(target)) {
+        setEntityMenuOpen(false);
       }
     }
     document.addEventListener('mousedown', onClick);
@@ -68,6 +77,56 @@ export function NavBar() {
                 <span className="hidden sm:inline">{item.label}</span>
               </Link>
             ))}
+          </div>
+
+          {/* Entity Selector */}
+          <div className="relative pl-4 border-l border-white/20" ref={entityMenuRef}>
+            <button
+              onClick={() => setEntityMenuOpen((v) => !v)}
+              className={cn(
+                'flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors',
+                ENTITY_COLORS[entity].bg,
+                ENTITY_COLORS[entity].text,
+                ENTITY_COLORS[entity].border
+              )}
+              title="Ganti entitas"
+            >
+              <Globe className="h-3.5 w-3.5" />
+              <span>{ENTITY_OPTIONS.find((o) => o.value === entity)?.short}</span>
+              <ChevronDown className={cn('h-3 w-3 transition-transform', entityMenuOpen && 'rotate-180')} />
+            </button>
+
+            {entityMenuOpen && (
+              <div className="absolute right-0 mt-2 w-56 rounded-lg bg-popover text-popover-foreground shadow-lg border border-border overflow-hidden z-50">
+                <div className="px-3 py-2 border-b border-border">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">
+                    Pilih Entitas
+                  </p>
+                </div>
+                {options.map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => {
+                      setEntity(opt.value);
+                      setEntityMenuOpen(false);
+                    }}
+                    className={cn(
+                      'w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left transition-colors hover:bg-muted',
+                      entity === opt.value && 'bg-muted/60 font-medium'
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        'inline-block h-2 w-2 rounded-full',
+                        opt.value === 'BBB' ? 'bg-amber-500' : opt.value === 'BBT' ? 'bg-sky-500' : 'bg-purple-500'
+                      )}
+                    />
+                    <span className="flex-1 truncate">{opt.label}</span>
+                    {entity === opt.value && <span className="text-xs text-primary">●</span>}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {status === 'authenticated' && session?.user && (
