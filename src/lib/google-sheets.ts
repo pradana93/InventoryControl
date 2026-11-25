@@ -286,19 +286,17 @@ export async function getFullDashboard() {
     getDashboardSummary(),
   ]);
 
-  // Unique SKU names present in inventory (or total items from Dasboard sheet)
-  const uniqueSkus = new Set(lots.map((l) => l.namaBarang).filter(Boolean));
-  const totalSKU = dashboardSummary.totalSKU || uniqueSkus.size;
+  // Unique SKU names present in inventory with stock > 0
+  const skusWithStock = new Set(lots.filter(l => l.qtySistem > 0).map(l => l.namaBarang).filter(Boolean));
+  const totalSKU = skusWithStock.size;
 
   // Total system qty (all rows)
   const totalSystemQty = lots.reduce((sum, l) => sum + l.qtySistem, 0);
 
-  // Total SOH (only rows that have been opname'd, i.e. SOH is not blank/zero-filled)
+  // Total SOH (only rows that have been opname'd)
   const totalSOH = lots.reduce((sum, l) => sum + l.soh, 0);
 
-  // Summary figures come from the Dasboard sheet, which computes variance and
-  // accuracy only over rows that were actually stock-opnamed. Recomputing from
-  // raw totals would wrongly include not-yet-counted rows.
+  // Summary figures from Dasboard sheet (pre-computed by spreadsheet formulas)
   const variance = dashboardSummary.totalVariance;
   const accuracy = dashboardSummary.accuracy;
   const outOfStockCount = dashboardSummary.outOfStockCount;
@@ -311,7 +309,7 @@ export async function getFullDashboard() {
     (l) => l.daysToExpiry >= 0 && l.daysToExpiry <= 30 && l.qtySistem > 0 && l.statusFefo !== 'HABIS'
   );
 
-  // Empty slots (racks with zero capacity assigned or no stock)
+  // Empty slots: Master Data racks that have 0 system qty
   const racksWithStock = new Set(lots.filter((l) => l.qtySistem > 0).map((l) => l.nomorRak));
   const emptySlots = master.racks.filter((r) => r.qty === 0 && !racksWithStock.has(r.rack)).length;
 
@@ -325,19 +323,23 @@ export async function getFullDashboard() {
     .slice(0, 10)
     .map(([namaBarang, qty]) => ({ namaBarang, qty }));
 
-  // Zone distribution — derived from rack code prefix (e.g. "A0101A" -> zone "A")
+  // Zone distribution — use Master Data's Jenis Lokasi (RACKING, FLOOR, CONTAINER, FREEZER)
   const zoneMap: Record<string, number> = {};
   for (const lot of lots) {
     if (lot.nomorRak) {
-      const zone = lot.nomorRak.replace(/[^A-Za-z].*$/, '') || lot.nomorRak[0];
+      const masterRack = master.racks.find(r => r.rack === lot.nomorRak);
+      const zone = masterRack?.locationType || lot.nomorRak.replace(/[^A-Za-z].*$/, '') || 'Unknown';
       zoneMap[zone] = (zoneMap[zone] || 0) + lot.qtySistem;
     }
   }
+  const zoneLabels: Record<string, string> = {
+    'RACKING': 'Zona Racking',
+    'FLOOR': 'Zona Floor',
+    'CONTAINER': 'Zona Container',
+    'FREEZER': 'Zona Freezer',
+  };
   const zoneDistribution = Object.entries(zoneMap)
-    .map(([zone, qty]) => {
-      const cleanZone = zone.startsWith('Zona ') ? zone : zone.toLowerCase().includes('floor') ? zone : `Zona ${zone}`;
-      return { zone: cleanZone, qty };
-    })
+    .map(([zone, qty]) => ({ zone: zoneLabels[zone] || zone, qty }))
     .sort((a, b) => b.qty - a.qty);
 
   return {
@@ -570,7 +572,107 @@ export async function submitInbound(data: {
   ];
 
   await appendRow(SHEETS.INBOUND, row);
-  return { success: true, message: 'Data inbound berhasil disimpan.' };
+  
+  // Also sync to Inventory sheet (keep Master Data aligned)
+  await syncInboundToInventory(data);
+  
+  return { success: true, message: 'Data inbound berhasil disimpan dan disinkronkan ke Inventory.' };
+}
+
+async function syncInboundToInventory(data: {
+  namaBarang: string;
+  totalQty: number;
+  tanggalInbound: string;
+  tanggalKadaluarsa: string;
+  rack1?: string; qtyRack1?: number;
+  rack2?: string; qtyRack2?: number;
+  rack3?: string; qtyRack3?: number;
+  rack4?: string; qtyRack4?: number;
+  rack5?: string; qtyRack5?: number;
+  rack6?: string; qtyRack6?: number;
+}) {
+  const client = await getSheetsClient();
+  const spreadsheetId = process.env.GOOGLE_SHEET_ID!;
+
+  // Read current Inventory to find existing rows
+  const invRows = await readSheet(SHEETS.INVENTORY);
+  const headerIdx = invRows.findIndex(r => r[0] === 'Nama Barang');
+  const invData = invRows.slice(headerIdx + 1);
+  
+  // Build map: rack -> row index (1-based for sheet)
+  const rackToRowIdx: Record<string, number> = {};
+  for (let i = 0; i < invData.length; i++) {
+    const rack = String(invData[i][1] || '').trim();
+    if (rack) rackToRowIdx[rack] = headerIdx + 2 + i; // +2 for header row + 1-based
+  }
+
+  const racks = [
+    { rack: data.rack1, qty: data.qtyRack1 || 0 },
+    { rack: data.rack2, qty: data.qtyRack2 || 0 },
+    { rack: data.rack3, qty: data.qtyRack3 || 0 },
+    { rack: data.rack4, qty: data.qtyRack4 || 0 },
+    { rack: data.rack5, qty: data.qtyRack5 || 0 },
+    { rack: data.rack6, qty: data.qtyRack6 || 0 },
+  ];
+
+  const updates = [];
+  
+  for (const { rack, qty } of racks) {
+    if (!rack || qty === 0) continue;
+    
+    const rowIdx = rackToRowIdx[rack];
+    
+    if (rowIdx) {
+      // Update existing row: add to Kuantitas Sistem (col C, index 2)
+      const currentRow = invData[rowIdx - headerIdx - 2];
+      const currentQty = parseInt(String(currentRow[2] || '0'), 10) || 0;
+      const newQty = currentQty + qty;
+      
+      updates.push({
+        range: `${SHEETS.INVENTORY}!C${rowIdx}`, // Kuantitas Sistem
+        values: [[newQty]],
+      });
+      
+      // Update Tanggal Inbound (col D, index 3) if newer
+      updates.push({
+        range: `${SHEETS.INVENTORY}!D${rowIdx}`,
+        values: [[data.tanggalInbound]],
+      });
+      
+      // Update Tanggal Kadaluarsa (col E, index 4)
+      updates.push({
+        range: `${SHEETS.INVENTORY}!E${rowIdx}`,
+        values: [[data.tanggalKadaluarsa]],
+      });
+      
+      // Update Nama Barang (col A, index 0) to match Master Data
+      updates.push({
+        range: `${SHEETS.INVENTORY}!A${rowIdx}`,
+        values: [[data.namaBarang]],
+      });
+    } else {
+      // New rack - append row (shouldn't happen if Master Data is complete, but handle anyway)
+      const newRow = [
+        data.namaBarang,
+        rack,
+        qty,
+        data.tanggalInbound,
+        data.tanggalKadaluarsa,
+        '0', '0', '100,00%', '', '0', '0'
+      ];
+      await appendRow(SHEETS.INVENTORY, newRow);
+    }
+  }
+
+  if (updates.length > 0) {
+    await client.spreadsheets.values.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        valueInputOption: 'USER_ENTERED',
+        data: updates,
+      },
+    });
+  }
 }
 
 function _str(v: any): string {
