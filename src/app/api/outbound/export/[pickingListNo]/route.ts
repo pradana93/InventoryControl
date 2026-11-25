@@ -24,19 +24,30 @@ export async function GET(
 
     const header = allRows[0].map(h => String(h).trim());
     
-    // Exact header mapping based on confirm/route.ts:
-    // ['No', 'Picking_List_No', 'RO_Number', 'Customer', 'Branch', 'RO_Date', 'Rack_ID', 'SKU_Name', 'Qty_Pick', 'Expired_Date', 'Zone', 'Sequence', 'Status', 'Timestamp']
-    const plNoIdx = header.indexOf('Picking_List_No');
-    const roIdx = header.indexOf('RO_Number');
-    const custIdx = header.indexOf('Customer');
-    const branchIdx = header.indexOf('Branch');
-    const roDateIdx = header.indexOf('RO_Date');
-    const rackIdx = header.indexOf('Rack_ID');
-    const skuIdx = header.indexOf('SKU_Name');
-    const qtyIdx = header.indexOf('Qty_Pick');
-    const expIdx = header.indexOf('Expired_Date');
-    const zoneIdx = header.indexOf('Zone');
-    const seqIdx = header.indexOf('Sequence');
+    // Find column indices (flexible matching)
+    const findIdx = (names: string[]) => {
+      for (const name of names) {
+        const idx = header.findIndex(h => h.toLowerCase() === name.toLowerCase());
+        if (idx !== -1) return idx;
+      }
+      return -1;
+    };
+
+    const plNoIdx = findIdx(['Picking_List_No', 'PickingListNo', 'PL_No']);
+    const roIdx = findIdx(['RO_Number', 'RONumber', 'RO_No']);
+    const custIdx = findIdx(['Customer']);
+    const branchIdx = findIdx(['Branch']);
+    const roDateIdx = findIdx(['RO_Date', 'RODate']);
+    const rackIdx = findIdx(['Rack_ID', 'RackId', 'Rack']);
+    const skuIdx = findIdx(['SKU_Name', 'SKUName', 'SKU']);
+    const qtyIdx = findIdx(['Qty_Pick', 'QtyPick', 'Qty']);
+    const expIdx = findIdx(['Expired_Date', 'ExpiredDate', 'Expiry']);
+    const zoneIdx = findIdx(['Zone', 'Zona']);
+    const seqIdx = findIdx(['Sequence', 'Seq']);
+
+    if (plNoIdx === -1) {
+      return NextResponse.json({ error: 'Format sheet tidak dikenali: kolom Picking_List_No tidak ditemukan' }, { status: 500 });
+    }
 
     const matchingRows = allRows.slice(1).filter(row => String(row[plNoIdx] || '').trim() === pickingListNo.trim());
     
@@ -45,15 +56,15 @@ export async function GET(
     }
 
     const firstRow = matchingRows[0];
-    const roNumber = String(firstRow[roIdx] || '');
-    const customer = String(firstRow[custIdx] || '');
-    const branch = String(firstRow[branchIdx] || '');
-    const roDate = String(firstRow[roDateIdx] || '');
+    const roNumber = roIdx !== -1 ? String(firstRow[roIdx] || '') : '';
+    const customer = custIdx !== -1 ? String(firstRow[custIdx] || '') : '';
+    const branch = branchIdx !== -1 ? String(firstRow[branchIdx] || '') : '';
+    const roDate = roDateIdx !== -1 ? String(firstRow[roDateIdx] || '') : '';
 
     // Sort by sequence
     matchingRows.sort((a, b) => {
-      const seqA = parseInt(String(a[seqIdx] || '0'), 10);
-      const seqB = parseInt(String(b[seqIdx] || '0'), 10);
+      const seqA = seqIdx !== -1 ? parseInt(String(a[seqIdx] || '0'), 10) : 0;
+      const seqB = seqIdx !== -1 ? parseInt(String(b[seqIdx] || '0'), 10) : 0;
       return seqA - seqB;
     });
 
@@ -75,17 +86,17 @@ export async function GET(
     // --- TABLE ROWS ---
     matchingRows.forEach((row, i) => {
       wsData.push([
-        String(row[seqIdx] || (i + 1)),
-        String(row[rackIdx] || ''),
-        String(row[zoneIdx] || ''),
-        String(row[skuIdx] || ''),
-        Number(row[qtyIdx] || 0),
-        String(row[expIdx] || ''),
+        String(seqIdx !== -1 ? row[seqIdx] : (i + 1)),
+        String(rackIdx !== -1 ? row[rackIdx] : ''),
+        String(zoneIdx !== -1 ? row[zoneIdx] : ''),
+        String(skuIdx !== -1 ? row[skuIdx] : ''),
+        Number(qtyIdx !== -1 ? row[qtyIdx] : 0),
+        String(expIdx !== -1 ? row[expIdx] : ''),
       ]);
     });
 
     // --- TOTAL ROW ---
-    const totalQty = matchingRows.reduce((sum, row) => sum + Number(row[qtyIdx] || 0), 0);
+    const totalQty = matchingRows.reduce((sum, row) => sum + Number(qtyIdx !== -1 ? row[qtyIdx] : 0), 0);
     wsData.push(['']);
     wsData.push(['TOTAL', '', '', '', totalQty, '']);
 
