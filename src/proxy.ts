@@ -25,6 +25,8 @@ export async function proxy(request: NextRequest) {
     cookieName: isProduction ? '__Secure-authjs.session-token' : 'authjs.session-token',
   });
 
+  console.log('[middleware-debug] token:', token ? { sub: token.sub, email: token.email, role: token.role } : 'null');
+
   // Not logged in -> redirect to login
   if (!token) {
     const url = new URL('/login', request.url);
@@ -33,6 +35,7 @@ export async function proxy(request: NextRequest) {
   }
 
   const role = token.role as string;
+  console.log('[middleware-debug] role check:', { pathname, role, allow: role === 'super-admin' || role === 'manager' });
 
   // Protect Inbound page (Only Super Admin and Manager)
   if (pathname.startsWith('/inbound')) {
