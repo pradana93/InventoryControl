@@ -6,15 +6,22 @@ export const dynamic = 'force-dynamic';
 /**
  * Confirm Outbound:
  * 1. Write negative qty entries to Ledger (outbound)
- * 2. Create Picking List sheet entry
+ * 2. Create Picking List sheet entry with RO details
  */
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const allocations = body.allocations || [];
+    const roNumber = body.roNumber?.trim() || '';
+    const customer = body.customer?.trim() || '';
+    const branch = body.branch?.trim() || '';
+    const roDate = body.roDate?.trim() || new Date().toISOString().slice(0, 10);
 
     if (!allocations.length) {
       return NextResponse.json({ error: 'Tidak ada alokasi untuk dikonfirmasi' }, { status: 400 });
+    }
+    if (!roNumber) {
+      return NextResponse.json({ error: 'RO Number wajib diisi' }, { status: 400 });
     }
 
     const client = await getSheetsClient();
@@ -37,15 +44,15 @@ export async function POST(request: Request) {
         -alloc.qtyAllocated, // NEGATIVE for outbound
         alloc.expiredDate,
         pickingListNo,
-        `Outbound via ${pickingListNo}`,
+        `Outbound via ${pickingListNo} (RO: ${roNumber})`,
       ]);
       ledgerEntries++;
     }
 
-    // 2. Write to Picking List sheet
+    // 2. Write to Picking List sheet (enhanced with RO details columns)
     const plHeaders = [
-      'No', 'Picking_List_No', 'Rack_ID', 'SKU_Name', 'Qty_Pick', 
-      'Expired_Date', 'Zone', 'Sequence', 'Status', 'Timestamp'
+      'No', 'Picking_List_No', 'RO_Number', 'Customer', 'Branch', 'RO_Date',
+      'Rack_ID', 'SKU_Name', 'Qty_Pick', 'Expired_Date', 'Zone', 'Sequence', 'Status', 'Timestamp'
     ];
 
     // Check if Picking List sheet exists, create if not
@@ -78,6 +85,10 @@ export async function POST(request: Request) {
     const plRows = allocations.map((alloc: any, i: number) => [
       String(nextNo + i + 1),
       pickingListNo,
+      roNumber,
+      customer,
+      branch,
+      roDate,
       alloc.rackId,
       alloc.skuName,
       String(alloc.qtyAllocated),
@@ -100,7 +111,11 @@ export async function POST(request: Request) {
       success: true,
       pickingListNo,
       ledgerEntries,
-      message: `Picking List ${pickingListNo} dibuat dengan ${ledgerEntries} entri.`
+      roNumber,
+      customer,
+      branch,
+      roDate,
+      message: `Picking List ${pickingListNo} dibuat untuk RO ${roNumber} dengan ${ledgerEntries} entri.`
     });
   } catch (error) {
     console.error('Confirm outbound error:', error);

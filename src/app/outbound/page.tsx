@@ -6,7 +6,26 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Loader2, FileText, Upload, Download, Trash2, AlertTriangle, CheckCircle2, Eye } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Loader2,
+  FileText,
+  Upload,
+  Download,
+  Trash2,
+  AlertTriangle,
+  CheckCircle2,
+  Eye,
+  FileSpreadsheet,
+  Printer,
+} from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `/pdf.worker.min.mjs`;
@@ -31,6 +50,16 @@ interface AllocationResult {
   sequence: number;
 }
 
+interface ConfirmedResult {
+  pickingListNo: string;
+  roNumber: string;
+  customer: string;
+  branch: string;
+  roDate: string;
+  ledgerEntries: number;
+  allocations: AllocationResult[];
+}
+
 export default function OutboundPage() {
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [parsedLines, setParsedLines] = useState<ParsedLine[]>([]);
@@ -40,6 +69,17 @@ export default function OutboundPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // RO confirmation dialog state
+  const [roDialogOpen, setRoDialogOpen] = useState(false);
+  const [roNumber, setRoNumber] = useState('');
+  const [roCustomer, setRoCustomer] = useState('');
+  const [roBranch, setRoBranch] = useState('');
+  const [roDate, setRoDate] = useState(new Date().toISOString().slice(0, 10));
+  const [roError, setRoError] = useState<string | null>(null);
+
+  // Confirmed picking list state
+  const [confirmed, setConfirmed] = useState<ConfirmedResult | null>(null);
 
   // Parse quantity string with Indonesian formatting support
   function parseQty(raw: string): number {
@@ -91,7 +131,12 @@ export default function OutboundPage() {
 
       const lines = fullText.split('\n').filter(l => l.trim().length > 3);
       const cells = lines.join(' | ').split('|').map(c => c.trim()).filter(c => c.length > 0);
-      
+
+      // Try to extract RO metadata from the PDF header (nice-to-have auto-fill)
+      const headerText = cells.join(' ');
+      const roMatch = headerText.match(/(?:No\.?\s*(?:SO|RO|Order)|SO|RO)\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-\/]{4,})/i);
+      if (roMatch && !roNumber) setRoNumber(roMatch[1].trim());
+
       const catalogRes = await fetch('/api/sku?action=names');
       const catalog = catalogRes.ok ? await catalogRes.json() : [];
 
@@ -177,31 +222,81 @@ export default function OutboundPage() {
     }
   }
 
-  // Confirm outbound - write to Ledger + Picking List
+  // Open the RO dialog before confirming
+  function openConfirmDialog() {
+    setRoError(null);
+    setRoDialogOpen(true);
+  }
+
+  // Confirm outbound - write to Ledger + Picking List with RO details
   async function handleConfirm() {
+    setRoError(null);
+    if (!roNumber.trim()) {
+      setRoError('RO Number wajib diisi');
+      return;
+    }
+
     setAllocating(true);
     
     try {
       const res = await fetch('/api/outbound/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ allocations }),
+        body: JSON.stringify({
+          allocations,
+          roNumber: roNumber.trim(),
+          customer: roCustomer.trim(),
+          branch: roBranch.trim(),
+          roDate,
+        }),
       });
       
-      if (!res.ok) throw new Error('Gagal konfirmasi');
-      
       const data = await res.json();
-      setSuccess(`Outbound dikonfirmasi! Picking List #${data.pickingListNo} dibuat. ${data.ledgerEntries} entri Ledger ditulis.`);
+      if (!res.ok) throw new Error(data.error || 'Gagal konfirmasi');
       
+      setConfirmed({
+        pickingListNo: data.pickingListNo,
+        roNumber: data.roNumber,
+        customer: data.customer,
+        branch: data.branch,
+        roDate: data.roDate,
+        ledgerEntries: data.ledgerEntries,
+        allocations,
+      });
+
+      setRoDialogOpen(false);
+      setSuccess(`Outbound dikonfirmasi! Picking List #${data.pickingListNo} untuk RO ${data.roNumber} dibuat. ${data.ledgerEntries} entri Ledger ditulis.`);
+      
+      // Keep allocations for the export view but clear the upload step
       setParsedLines([]);
-      setAllocations([]);
       setPdfFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (e) {
-      setError('Gagal konfirmasi: ' + (e as Error).message);
+      setRoError('Gagal konfirmasi: ' + (e as Error).message);
     } finally {
       setAllocating(false);
     }
+  }
+
+  // Download Excel export of the confirmed picking list
+  function handleExportExcel() {
+    if (!confirmed) return;
+    window.open(`/api/outbound/export/${encodeURIComponent(confirmed.pickingListNo)}`, '_blank');
+  }
+
+  // Start a new outbound after confirming
+  function handleNewOutbound() {
+    setConfirmed(null);
+    setAllocations([]);
+    setParsedLines([]);
+    setPdfFile(null);
+    setRoNumber('');
+    setRoCustomer('');
+    setRoBranch('');
+    setRoDate(new Date().toISOString().slice(0, 10));
+    setSuccess(null);
+    setError(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -211,6 +306,7 @@ export default function OutboundPage() {
       setError(null);
       setSuccess(null);
       setAllocations([]);
+      setConfirmed(null);
     }
   }
 
@@ -222,6 +318,7 @@ export default function OutboundPage() {
       setError(null);
       setSuccess(null);
       setAllocations([]);
+      setConfirmed(null);
     }
   }
 
@@ -229,150 +326,63 @@ export default function OutboundPage() {
     e.preventDefault();
   }
 
+  const totalQty = allocations.reduce((s, a) => s + a.qtyAllocated, 0);
+
   return (
     <div className="p-6 space-y-6 max-w-6xl mx-auto">
       <h1 className="text-2xl font-bold flex items-center gap-2">
         <FileText className="h-6 w-6" /> Outbound & Picking List
       </h1>
 
-      {/* Step 1: PDF Upload */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            1. Upload Rekap Order (PDF dari Accurate)
-            {pdfFile && <span className="text-sm font-normal text-muted-foreground">{pdfFile.name}</span>}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div
-            className="border-2 border-dashed border-border rounded-lg p-8 text-center hover:border-primary/50 transition-colors cursor-pointer"
-            onDrop={handleDrop}
-            onDragOver={handleDragOver}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf"
-              onChange={handleFileChange}
-              className="hidden"
-              id="pdf-upload"
-            />
-            <label htmlFor="pdf-upload" className="cursor-pointer">
-              <Upload className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
-              <p className="text-lg font-medium">Drag & Drop PDF di sini</p>
-              <p className="text-sm text-muted-foreground">atau klik untuk browse</p>
-            </label>
-          </div>
-
-          {pdfFile && !parsing && (
-            <Button onClick={() => parsePdf(pdfFile!)} disabled={parsing} className="w-full">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Parse & Ekstrak Data
-            </Button>
-          )}
-
-          {parsing && <div className="flex justify-center gap-2"><Loader2 className="animate-spin" /><span>Memproses PDF...</span></div>}
-        </CardContent>
-      </Card>
-
-      {/* Step 2: Parsed Lines Preview & Manual Edit */}
-      {parsedLines.length > 0 && (
+      {/* Confirmed Result View */}
+      {confirmed ? (
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              2. Review & Matching SKU ({parsedLines.filter(p => p.matched).length}/{parsedLines.length} matched)
-              {parsedLines.length > 0 && (
-                <Button variant="outline" size="sm" onClick={() => { setParsedLines([]); setPdfFile(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}>
-                  <Trash2 className="mr-1 h-4 w-4" /> Hapus Semua
+            <CardTitle className="flex items-center justify-between flex-wrap gap-2">
+              <span className="flex items-center gap-2 text-emerald-700">
+                <CheckCircle2 className="h-5 w-5" /> Picking List Berhasil Dibuat
+              </span>
+              <div className="flex gap-2">
+                <Button onClick={handleExportExcel} className="bg-emerald-600 hover:bg-emerald-700">
+                  <FileSpreadsheet className="mr-2 h-4 w-4" /> Export Excel
                 </Button>
-              )}
+                <Button variant="outline" onClick={() => window.print()}>
+                  <Printer className="mr-2 h-4 w-4" /> Print
+                </Button>
+                <Button variant="outline" onClick={handleNewOutbound}>
+                  <Upload className="mr-2 h-4 w-4" /> Outbound Baru
+                </Button>
+              </div>
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>#</TableHead>
-                    <TableHead>Nama Barang (dari PDF)</TableHead>
-                    <TableHead>Qty Order</TableHead>
-                    <TableHead>Status Match</TableHead>
-                    <TableHead>Saran Katalog</TableHead>
-                    <TableHead>Aksi</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {parsedLines.map((line) => (
-                    <TableRow key={line.index} className={!line.matched ? 'bg-destructive/5' : ''}>
-                      <TableCell>{line.index + 1}</TableCell>
-                      <TableCell>
-                        <Input
-                          value={line.skuName}
-                          onChange={(e) => setParsedLines(parsedLines.map(p => p.index === line.index ? { ...p, skuName: e.target.value, matched: false } : p))}
-                          className="w-full"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          type="number"
-                          min="1"
-                          value={line.qtyOrdered}
-                          onChange={(e) => setParsedLines(parsedLines.map(p => p.index === line.index ? { ...p, qtyOrdered: parseFloat(e.target.value) || 0 } : p))}
-                          className="w-24"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        {line.matched ? (
-                          <span className="flex items-center gap-1 text-emerald-600">
-                            <CheckCircle2 className="h-4 w-4" />
-                            <span>{(line.matchConfidence * 100).toFixed(0)}%</span>
-                          </span>
-                        ) : (
-                          <span className="flex items-center gap-1 text-amber-600">
-                            <AlertTriangle className="h-4 w-4" />
-                            <span>Belum match</span>
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {line.suggestion || '-'}
-                      </TableCell>
-                      <TableCell>
-                        {!line.matched && (
-                          <Button variant="outline" size="sm" onClick={() => {}}>
-                            Cari
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+          <CardContent className="space-y-4">
+            {/* RO Header Details */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 rounded-lg bg-muted/50">
+              <div>
+                <p className="text-xs text-muted-foreground">Picking List No</p>
+                <p className="font-mono font-semibold">{confirmed.pickingListNo}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">RO Number</p>
+                <p className="font-semibold">{confirmed.roNumber}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Customer / Branch</p>
+                <p className="font-semibold">{confirmed.customer || '-'} {confirmed.branch ? `(${confirmed.branch})` : ''}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">RO Date</p>
+                <p className="font-semibold">{confirmed.roDate}</p>
+              </div>
             </div>
 
-            {parsedLines.some(p => p.matched) && (
-              <Button onClick={handleAllocate} disabled={allocating} className="w-full mt-4">
-                {allocating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Eye className="mr-2 h-4 w-4" />}
-                {allocating ? 'Mengalokasikan...' : 'Alokasikan (FEFO + Rack Sequence)'}
-              </Button>
-            )}
-          </CardContent>
-        </Card>
-      )}
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">
+                {confirmed.allocations.length} pick points &middot; Total Qty: <span className="font-bold text-foreground">{totalQty}</span>
+              </p>
+              <p className="text-sm text-muted-foreground">{confirmed.ledgerEntries} entri Ledger tercatat</p>
+            </div>
 
-      {/* Step 3: Allocation Results */}
-      {allocations.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              3. Hasil Alokasi & Urutan Pick ({allocations.length} pick points)
-              <Button onClick={handleConfirm} disabled={allocating}>
-                {allocating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-                Konfirmasi Outbound
-              </Button>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -386,7 +396,7 @@ export default function OutboundPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {allocations.map((a, i) => (
+                  {confirmed.allocations.map((a, i) => (
                     <TableRow key={`${a.rackId}-${a.skuName}-${i}`}>
                       <TableCell className="font-mono">{a.sequence}</TableCell>
                       <TableCell className="font-medium">{a.rackId}</TableCell>
@@ -403,10 +413,259 @@ export default function OutboundPage() {
             </div>
           </CardContent>
         </Card>
+      ) : (
+        <>
+          {/* Step 1: PDF Upload */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between">
+                1. Upload Rekap Order (PDF dari Accurate)
+                {pdfFile && <span className="text-sm font-normal text-muted-foreground">{pdfFile.name}</span>}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div
+                className="border-2 border-dashed border-border rounded-lg p-8 text-center hover:border-primary/50 transition-colors cursor-pointer"
+                onDrop={handleDrop}
+                onDragOver={handleDragOver}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf"
+                  onChange={handleFileChange}
+                  className="hidden"
+                  id="pdf-upload"
+                />
+                <label htmlFor="pdf-upload" className="cursor-pointer">
+                  <Upload className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
+                  <p className="text-lg font-medium">Drag & Drop PDF di sini</p>
+                  <p className="text-sm text-muted-foreground">atau klik untuk browse</p>
+                </label>
+              </div>
+
+              {pdfFile && !parsing && (
+                <Button onClick={() => parsePdf(pdfFile!)} disabled={parsing} className="w-full">
+                  <FileText className="mr-2 h-4 w-4" />
+                  Parse & Ekstrak Data
+                </Button>
+              )}
+
+              {parsing && <div className="flex justify-center gap-2"><Loader2 className="animate-spin" /><span>Memproses PDF...</span></div>}
+            </CardContent>
+          </Card>
+
+          {/* Step 2: Parsed Lines Preview & Manual Edit */}
+          {parsedLines.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between">
+                  2. Review & Matching SKU ({parsedLines.filter(p => p.matched).length}/{parsedLines.length} matched)
+                  {parsedLines.length > 0 && (
+                    <Button variant="outline" size="sm" onClick={() => { setParsedLines([]); setPdfFile(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}>
+                      <Trash2 className="mr-1 h-4 w-4" /> Hapus Semua
+                    </Button>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>#</TableHead>
+                        <TableHead>Nama Barang (dari PDF)</TableHead>
+                        <TableHead>Qty Order</TableHead>
+                        <TableHead>Status Match</TableHead>
+                        <TableHead>Saran Katalog</TableHead>
+                        <TableHead>Aksi</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {parsedLines.map((line) => (
+                        <TableRow key={line.index} className={!line.matched ? 'bg-destructive/5' : ''}>
+                          <TableCell>{line.index + 1}</TableCell>
+                          <TableCell>
+                            <Input
+                              value={line.skuName}
+                              onChange={(e) => setParsedLines(parsedLines.map(p => p.index === line.index ? { ...p, skuName: e.target.value, matched: false } : p))}
+                              className="w-full"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              min="1"
+                              value={line.qtyOrdered}
+                              onChange={(e) => setParsedLines(parsedLines.map(p => p.index === line.index ? { ...p, qtyOrdered: parseFloat(e.target.value) || 0 } : p))}
+                              className="w-24"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            {line.matched ? (
+                              <span className="flex items-center gap-1 text-emerald-600">
+                                <CheckCircle2 className="h-4 w-4" />
+                                <span>{(line.matchConfidence * 100).toFixed(0)}%</span>
+                              </span>
+                            ) : (
+                              <span className="flex items-center gap-1 text-amber-600">
+                                <AlertTriangle className="h-4 w-4" />
+                                <span>Belum match</span>
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {line.suggestion || '-'}
+                          </TableCell>
+                          <TableCell>
+                            {!line.matched && (
+                              <Button variant="outline" size="sm" onClick={() => {}}>
+                                Cari
+                              </Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                {parsedLines.some(p => p.matched) && (
+                  <Button onClick={handleAllocate} disabled={allocating} className="w-full mt-4">
+                    {allocating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Eye className="mr-2 h-4 w-4" />}
+                    {allocating ? 'Mengalokasikan...' : 'Alokasikan (FEFO + Rack Sequence)'}
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Step 3: Allocation Results */}
+          {allocations.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between">
+                  3. Hasil Alokasi & Urutan Pick ({allocations.length} pick points)
+                  <Button onClick={openConfirmDialog} disabled={allocating}>
+                    {allocating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                    Konfirmasi Outbound
+                  </Button>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Seq</TableHead>
+                        <TableHead>Rak</TableHead>
+                        <TableHead>Zona</TableHead>
+                        <TableHead>SKU</TableHead>
+                        <TableHead>Qty Pick</TableHead>
+                        <TableHead>Expired</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {allocations.map((a, i) => (
+                        <TableRow key={`${a.rackId}-${a.skuName}-${i}`}>
+                          <TableCell className="font-mono">{a.sequence}</TableCell>
+                          <TableCell className="font-medium">{a.rackId}</TableCell>
+                          <TableCell>
+                            <span className="text-xs px-2 py-0.5 rounded bg-muted">{a.zone}</span>
+                          </TableCell>
+                          <TableCell>{a.skuName}</TableCell>
+                          <TableCell className="font-bold">{a.qtyAllocated}</TableCell>
+                          <TableCell>{a.expiredLabel}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </>
       )}
 
       {error && <div className="p-4 bg-destructive/10 border border-destructive/20 text-destructive rounded-lg">{error}</div>}
       {success && <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg">{success}</div>}
+
+      {/* RO Details Dialog */}
+      <Dialog open={roDialogOpen} onOpenChange={setRoDialogOpen}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>Detail RO untuk Picking List</DialogTitle>
+            <DialogDescription>
+              Isi detail Rekap Order sebelum membuat Picking List. Informasi ini akan tercetak pada Excel.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="ro-number">RO Number <span className="text-destructive">*</span></Label>
+              <Input
+                id="ro-number"
+                value={roNumber}
+                onChange={(e) => setRoNumber(e.target.value)}
+                placeholder="mis. SO-VIT-2026-00123"
+                autoFocus
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="ro-customer">Customer</Label>
+                <Input
+                  id="ro-customer"
+                  value={roCustomer}
+                  onChange={(e) => setRoCustomer(e.target.value)}
+                  placeholder="mis. PT Bangor Berkembang Bersama"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="ro-branch">Branch / Cabang</Label>
+                <Input
+                  id="ro-branch"
+                  value={roBranch}
+                  onChange={(e) => setRoBranch(e.target.value)}
+                  placeholder="mis. Vittoria"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ro-date">Tanggal RO</Label>
+              <Input
+                id="ro-date"
+                type="date"
+                value={roDate}
+                onChange={(e) => setRoDate(e.target.value)}
+              />
+            </div>
+
+            <div className="rounded-lg bg-muted/50 p-3 text-sm">
+              <p className="text-muted-foreground">
+                <span className="font-semibold text-foreground">{allocations.length}</span> pick points &middot; Total Qty{' '}
+                <span className="font-semibold text-foreground">{totalQty}</span>
+              </p>
+            </div>
+
+            {roError && (
+              <div className="p-3 bg-destructive/10 border border-destructive/20 text-destructive text-sm rounded-lg">
+                {roError}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRoDialogOpen(false)} disabled={allocating}>
+              Batal
+            </Button>
+            <Button onClick={handleConfirm} disabled={allocating || !roNumber.trim()}>
+              {allocating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+              {allocating ? 'Memproses...' : 'Konfirmasi & Buat Picking List'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
