@@ -21,13 +21,13 @@ interface DashboardData {
     emptySlots: number;
   };
   alerts: {
-    expired: Array<{ namaBarang: string; nomorRak: string; qty: number; expiredDate: string }>;
-    expiring: Array<{ namaBarang: string; nomorRak: string; qty: number; expiredDate: string; daysLeft: number }>;
-    outOfStock: string[];
+    expired: Array<{ namaBarang: string; nomorRak: string; qty: number; expiredDate: string; entitas?: string }>;
+    expiring: Array<{ namaBarang: string; nomorRak: string; qty: number; expiredDate: string; daysLeft: number; entitas?: string }>;
+    outOfStock: Array<{ namaBarang: string; entitas?: string }>;
   };
   charts: {
-    topSkus: Array<{ namaBarang: string; qty: number }>;
-    zoneDistribution: Array<{ zone: string; qty: number }>;
+    topSkus: Array<{ namaBarang: string; qty: number; entitas?: string }>;
+    zoneDistribution: Array<{ zone: string; qty: number; entitas?: string }>;
   };
   inventory: Array<any>;
 }

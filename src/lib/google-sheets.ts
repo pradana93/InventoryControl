@@ -596,19 +596,39 @@ export async function getInventoryLots(): Promise<InventoryLot[]> {
 // DASHBOARD AGGREGATIONS
 // ============================================================================
 
-export async function getFullDashboard() {
+export type EntityFilter = 'BBB' | 'BBT' | 'ALL';
+
+export async function getFullDashboard(entity?: EntityFilter) {
   const [lots, warehouse, catalog] = await Promise.all([
     getInventoryLots(),
     getWarehouse(),
     getCatalog(),
   ]);
 
-  const activeLots = lots.filter(l => l.qtySistem > 0);
+  // Filter by entity if specified
+  const entityWarehouse = entity && entity !== 'ALL'
+    ? warehouse.filter(w => w.entitas === entity)
+    : warehouse;
+
+  const entityCatalog = entity && entity !== 'ALL'
+    ? catalog.filter(c => c.entitas === entity)
+    : catalog;
+
+  const entityWarehouseIds = new Set(entityWarehouse.map(w => w.rackId));
+  const entityCatalogNames = new Set(entityCatalog.map(c => c.namaBarang.toLowerCase()));
+
+  // Filter lots by entity
+  const filteredLots = lots.filter(l => 
+    entityWarehouseIds.has(l.nomorRak) && 
+    (l.namaBarang === '-' || entityCatalogNames.has(l.namaBarang.toLowerCase()))
+  );
+
+  const activeLots = filteredLots.filter(l => l.qtySistem > 0);
   const skusWithStock = new Set(activeLots.map(l => l.namaBarang).filter(Boolean));
   const totalSKU = skusWithStock.size;
 
-  const totalSystemQty = lots.reduce((sum, l) => sum + l.qtySistem, 0);
-  const totalSOH = lots.reduce((sum, l) => sum + l.soh, 0);
+  const totalSystemQty = activeLots.reduce((sum, l) => sum + l.qtySistem, 0);
+  const totalSOH = activeLots.reduce((sum, l) => sum + l.soh, 0);
 
   // Expired/Expiring
   const expiredLots = activeLots.filter(l => l.statusFefo === 'EXPIRED' || l.statusFefo === 'EXPIRED HARI INI');
@@ -635,21 +655,23 @@ export async function getFullDashboard() {
     .slice(0, 10)
     .map(([namaBarang, qty]) => ({ namaBarang, qty }));
 
-  // Empty racks
-  const emptyRacks = lots.filter(l => l.qtySistem === 0).length;
+  // Empty racks (only for this entity)
+  const entityRackIds = new Set(entityWarehouse.map(w => w.rackId));
+  const emptyRacks = filteredLots.filter(l => l.qtySistem === 0 && entityRackIds.has(l.nomorRak)).length;
 
-  // Calculate real variance and accuracy from Stock Opname
-  const lotsWithOpname = lots.filter(l => l.qtySistem > 0 || l.soh > 0);
-  const totalVariance = lotsWithOpname.reduce((sum, l) => sum + l.variance, 0);
-  const avgAccuracy = lotsWithOpname.length > 0 
-    ? lotsWithOpname.reduce((sum, l) => sum + l.akurasi, 0) / lotsWithOpname.length 
+  // Calculate real variance and accuracy from Stock Opname (entity filtered)
+  const entityLotsWithOpname = filteredLots.filter(l => (l.qtySistem > 0 || l.soh > 0) && entityRackIds.has(l.nomorRak));
+  const totalVariance = entityLotsWithOpname.reduce((sum, l) => sum + l.variance, 0);
+  const avgAccuracy = entityLotsWithOpname.length > 0 
+    ? entityLotsWithOpname.reduce((sum, l) => sum + l.akurasi, 0) / entityLotsWithOpname.length 
     : 100;
 
   return {
+    entity: entity || 'ALL',
     summary: {
-      totalSKU,
-      totalSystemQty,
-      totalSOH,
+      totalSKU: entityCatalogNames.size,
+      totalSystemQty: activeLots.reduce((sum, l) => sum + l.qtySistem, 0),
+      totalSOH: activeLots.reduce((sum, l) => sum + l.soh, 0),
       variance: Math.round(totalVariance),
       accuracy: Math.round(avgAccuracy * 100) / 100,
       expiredCount: expiredLots.length,
@@ -663,6 +685,7 @@ export async function getFullDashboard() {
         nomorRak: l.nomorRak,
         qty: l.qtySistem,
         expiredDate: l.expiredLabel,
+        entitas: l.entitas,
       })),
       expiring: expiringSoon.slice(0, 10).map(l => ({
         namaBarang: l.namaBarang,
@@ -670,21 +693,22 @@ export async function getFullDashboard() {
         qty: l.qtySistem,
         expiredDate: l.expiredLabel,
         daysLeft: l.daysToExpiry,
+        entitas: l.entitas,
       })),
-      outOfStock: lots.filter(l => l.qtySistem === 0 && l.namaBarang !== '-').slice(0, 10).map(l => l.namaBarang),
+      outOfStock: filteredLots.filter(l => l.qtySistem === 0 && l.namaBarang !== '-' && entityRackIds.has(l.nomorRak)).slice(0, 10).map(l => ({ namaBarang: l.namaBarang, entitas: l.entitas })),
     },
     charts: {
-      topSkus,
-      zoneDistribution,
+      topSkus: topSkus.map(s => ({ ...s, entitas: entity || 'ALL' })),
+      zoneDistribution: zoneDistribution.map(z => ({ ...z, entitas: entity || 'ALL' })),
     },
-    inventory: lots,
+    inventory: filteredLots,
   };
 }
 
-export async function getFefoLots(limit = 50) {
+export async function getFefoLots(limit = 50, entity?: EntityFilter) {
   const lots = await getInventoryLots();
   return lots
-    .filter(l => l.qtySistem > 0)
+    .filter(l => l.qtySistem > 0 && (!entity || entity === 'ALL' || l.entitas === entity))
     .sort((a, b) => a.daysToExpiry - b.daysToExpiry)
     .slice(0, limit)
     .map(l => ({
@@ -695,6 +719,7 @@ export async function getFefoLots(limit = 50) {
       expiredLabel: l.expiredLabel,
       statusFefo: l.statusFefo,
       category: l.category,
+      entitas: l.entitas,
     }));
 }
 

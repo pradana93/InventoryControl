@@ -36,13 +36,18 @@ interface FefoLot {
   expiredLabel: string;
   statusFefo: string;
   category: string;
+  entitas?: string;
 }
 
-export function DashboardView() {
+interface DashboardViewProps {
+  initialEntity: 'BBB' | 'BBT' | 'ALL';
+}
+
+export function DashboardView({ initialEntity }: DashboardViewProps) {
   const { data: session } = useSession();
   const role = (session?.user as any)?.role as string | undefined;
 
-  const { data, loading, error, connected, lastUpdated, refresh } = useDashboardStream();
+  const { data, loading, error, connected, lastUpdated, refresh } = useDashboardStream(initialEntity);
 
   const [fefoData, setFefoData] = useState<FefoLot[]>([]);
   const [skuData, setSkuData] = useState<any[]>([]);
@@ -51,11 +56,12 @@ export function DashboardView() {
 
   // Load tables once (heavy payload, not streamed)
   useEffect(() => {
+    const ent = initialEntity === 'ALL' ? '' : initialEntity;
     async function loadTables() {
       try {
         const [skuRes, detailRes] = await Promise.all([
-          fetch('/api/sku?action=stock'),
-          fetch('/api/rack?action=detail'),
+          fetch(`/api/sku?action=stock${ent ? `&ent=${ent}` : ''}`),
+          fetch(`/api/rack?action=detail${ent ? `&ent=${ent}` : ''}`),
         ]);
         if (skuRes.ok) setSkuData(await skuRes.json());
         if (detailRes.ok) setDetailData(await detailRes.json());
@@ -66,20 +72,21 @@ export function DashboardView() {
       }
     }
     loadTables();
-  }, []);
+  }, [initialEntity]);
 
   // Load FEFO lots for timeline
   useEffect(() => {
+    const ent = initialEntity === 'ALL' ? '' : initialEntity;
     async function loadFefo() {
       try {
-        const res = await fetch('/api/fefo?limit=50', { cache: 'no-store' });
+        const res = await fetch(`/api/fefo?limit=50${ent ? `&ent=${ent}` : ''}`, { cache: 'no-store' });
         if (res.ok) setFefoData(await res.json());
       } catch (e) {
         console.error('Failed to load FEFO', e);
       }
     }
     loadFefo();
-  }, [lastUpdated]);
+  }, [lastUpdated, initialEntity]);
 
   if (loading) {
     return (

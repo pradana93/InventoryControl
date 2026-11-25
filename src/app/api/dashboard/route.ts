@@ -1,9 +1,14 @@
 import { NextResponse } from 'next/server';
-import { getFullDashboard } from '@/lib/google-sheets';
+import { getFullDashboard, EntityFilter } from '@/lib/google-sheets';
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const data = await getFullDashboard();
+    const { searchParams } = new URL(request.url);
+    const ent = searchParams.get('ent')?.toUpperCase() as EntityFilter | null;
+    
+    const validEntity: EntityFilter = (ent === 'BBB' || ent === 'BBT' || ent === 'ALL') ? ent : 'BBB';
+    
+    const data = await getFullDashboard(validEntity);
     return NextResponse.json(data);
   } catch (error) {
     console.error('Dashboard API error:', error);

@@ -17,23 +17,24 @@ export interface DashboardSummary {
 export interface DashboardData {
   summary: DashboardSummary;
   alerts: {
-    expired: Array<{ namaBarang: string; nomorRak: string; qty: number; expiredDate: string }>;
-    expiring: Array<{ namaBarang: string; nomorRak: string; qty: number; expiredDate: string; daysLeft: number }>;
-    outOfStock: string[];
+    expired: Array<{ namaBarang: string; nomorRak: string; qty: number; expiredDate: string; entitas?: string }>;
+    expiring: Array<{ namaBarang: string; nomorRak: string; qty: number; expiredDate: string; daysLeft: number; entitas?: string }>;
+    outOfStock: Array<{ namaBarang: string; entitas?: string }>;
   };
   charts: {
-    topSkus: Array<{ namaBarang: string; qty: number }>;
-    zoneDistribution: Array<{ zone: string; qty: number }>;
+    topSkus: Array<{ namaBarang: string; qty: number; entitas?: string }>;
+    zoneDistribution: Array<{ zone: string; qty: number; entitas?: string }>;
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   inventory: any[];
+  entity: string;
 }
 
 /**
  * Fetches dashboard data once, then subscribes to the SSE stream (/api/dashboard/stream)
  * which pushes fresh data every 30 seconds. Falls back gracefully to polling if SSE fails.
  */
-export function useDashboardStream() {
+export function useDashboardStream(entity: 'BBB' | 'BBT' | 'ALL') {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +52,9 @@ export function useDashboardStream() {
   // Manual refresh pulls a single snapshot
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch('/api/dashboard', { cache: 'no-store' });
+      const ent = entity === 'ALL' ? '' : entity;
+      const url = `/api/dashboard${ent ? `?ent=${ent}` : ''}`;
+      const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) throw new Error('Gagal memuat data dashboard');
       const json = await res.json();
       applyData(json);
@@ -59,7 +62,7 @@ export function useDashboardStream() {
       setError(err instanceof Error ? err.message : 'Terjadi kesalahan');
       setLoading(false);
     }
-  }, [applyData]);
+  }, [applyData, entity]);
 
   useEffect(() => {
     refresh();
@@ -67,7 +70,9 @@ export function useDashboardStream() {
     // Subscribe to SSE
     let es: EventSource | null = null;
     try {
-      es = new EventSource('/api/dashboard/stream');
+      const ent = entity === 'ALL' ? '' : entity;
+      const streamUrl = `/api/dashboard/stream${ent ? `?ent=${ent}` : ''}`;
+      es = new EventSource(streamUrl);
       eventSourceRef.current = es;
 
       es.onopen = () => setConnected(true);

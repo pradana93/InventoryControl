@@ -11,12 +11,18 @@ interface AlertItem {
   qty: number;
   expiredDate?: string;
   daysLeft?: number;
+  entitas?: string;
+}
+
+interface OutOfStockItem {
+  namaBarang: string;
+  entitas?: string;
 }
 
 interface AlertBannerProps {
   expired: AlertItem[];
   expiring: AlertItem[];
-  outOfStock: string[];
+  outOfStock: OutOfStockItem[];
 }
 
 export function AlertBanner({ expired, expiring, outOfStock }: AlertBannerProps) {
@@ -100,9 +106,10 @@ export function AlertBanner({ expired, expiring, outOfStock }: AlertBannerProps)
               </h3>
             </div>
             <div className="flex flex-wrap gap-2">
-              {outOfStock.slice(0, 15).map((sku, i) => (
-                <Badge key={i} className="text-xs">
-                  {sku}
+              {outOfStock.slice(0, 15).map((item, i) => (
+                <Badge key={i} className="text-xs" variant="outline">
+                  {item.namaBarang}
+                  {item.entitas && <span className="ml-1 opacity-70">({item.entitas})</span>}
                 </Badge>
               ))}
               {outOfStock.length > 15 && (
