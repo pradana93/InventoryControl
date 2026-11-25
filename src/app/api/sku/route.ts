@@ -1,21 +1,49 @@
 import { NextResponse } from 'next/server';
-import { getCatalog } from '@/lib/google-sheets';
+import { getCatalog, getStockDetail, EntityFilter } from '@/lib/google-sheets';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * GET /api/sku?action=names[&entitas=BBB|BBT]
+ * GET /api/sku?action=names[&entitas=BBB|BBT|&ent=BBB|BBT]
  * Returns list of SKU names and IDs for fuzzy matching.
  * Optionally filtered by entity (BBB or BBT).
  *
  * GET /api/sku?action=list[&entitas=BBB|BBT]
  * Returns full catalog entries (including entity), optionally filtered.
+ *
+ * GET /api/sku?action=stock[&ent=BBB|BBT|ALL]
+ * Returns per-SKU stock rows for the dashboard tables.
+ *
+ * GET /api/sku?action=rack-details&skuName=...&ent=BBB
+ * Returns rack allocations for a given SKU within the entity.
  */
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const action = searchParams.get('action');
-    const entitas = searchParams.get('entitas')?.toUpperCase();
+    const entParam = searchParams.get('ent')?.toUpperCase();
+    const entitas = (searchParams.get('entitas')?.toUpperCase()) || (entParam !== 'ALL' ? entParam : undefined);
+
+    const entity: EntityFilter =
+      entParam === 'BBB' || entParam === 'BBT' || entParam === 'ALL' ? entParam : 'BBB';
+
+    if (action === 'stock') {
+      const details = await getStockDetail('', entity);
+      return NextResponse.json(details);
+    }
+
+    if (action === 'rack-details') {
+      const skuName = searchParams.get('skuName') || '';
+      const details = await getStockDetail(skuName, entity);
+      const racks = details
+        .filter(d => d.namaBarang.toLowerCase() === skuName.toLowerCase())
+        .map(d => ({
+          rack: d.nomorRak,
+          qtySistem: d.qtySistem,
+          entitas: d.entitas,
+        }));
+      return NextResponse.json(racks);
+    }
 
     const catalog = await getCatalog();
     const filtered = entitas

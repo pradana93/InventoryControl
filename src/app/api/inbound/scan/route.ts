@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { submitInbound } from '@/lib/google-sheets';
+import { submitInbound, getWarehouse } from '@/lib/google-sheets';
 
 /**
  * Public inbound endpoint used by the mobile rack-scan flow.
@@ -26,7 +26,16 @@ export async function POST(request: Request) {
       );
     }
 
+    // Determine entity from rack
+    const warehouse = await getWarehouse();
+    const rackInfo = warehouse.find(w => w.rackId === body.rack1);
+    if (!rackInfo) {
+      return NextResponse.json({ error: `Rack ${body.rack1} tidak ditemukan` }, { status: 400 });
+    }
+    const entitas = rackInfo.entitas === 'BBB' || rackInfo.entitas === 'BBT' ? rackInfo.entitas : 'BBB';
+
     const result = await submitInbound({
+      entitas,
       barcode: body.barcode || '',
       namaBarang: body.namaBarang,
       totalQty: Number(body.totalQty),

@@ -17,10 +17,13 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Loader2, Plus, Trash2, ArrowLeft, Check, AlertCircle } from 'lucide-react';
 import Link from 'next/link';
+import { useEntity } from '@/hooks/useEntity';
+import { ENTITY_COLORS } from '@/lib/constants';
 
 interface RackOption {
   rack: string;
   qtySistem: number;
+  entitas?: string;
 }
 
 interface RackAllocation {
@@ -29,9 +32,11 @@ interface RackAllocation {
 }
 
 export default function InboundForm() {
+  const { entity, badge } = useEntity();
+
   // Form State
   const [barcode, setBarcode] = useState('');
-  const [skuList, setSkuList] = useState<string[]>([]);
+  const [skuList, setSkuList] = useState<Array<{skuId: string, namaBarang: string, entitas: string}>>([]);
   const [selectedSku, setSelectedSku] = useState('');
   const [palletCode, setPalletCode] = useState('');
   const [nomorSJ, setNomorSJ] = useState('');
@@ -59,12 +64,13 @@ export default function InboundForm() {
 
     async function loadSkus() {
       try {
-        const res = await fetch('/api/sku?action=names');
+        const ent = entity === 'ALL' ? '' : entity;
+        const res = await fetch(`/api/sku?action=names${ent ? `&ent=${ent}` : ''}`);
         if (res.ok) {
           const data = await res.json();
           setSkuList(data);
           if (Array.isArray(data) && data.length > 0) {
-            setSelectedSku(data[0]);
+            setSelectedSku(data[0].namaBarang || data[0]);
           }
         }
       } catch (err) {
@@ -74,7 +80,7 @@ export default function InboundForm() {
       }
     }
     loadSkus();
-  }, []);
+  }, [entity]);
 
   // When SKU changes, load available racks & current stock
   useEffect(() => {
@@ -86,7 +92,8 @@ export default function InboundForm() {
     async function loadRacks() {
       setLoadingRacks(true);
       try {
-        const res = await fetch(`/api/sku?action=rack-details&skuName=${encodeURIComponent(selectedSku)}`);
+        const ent = entity === 'ALL' ? '' : entity;
+        const res = await fetch(`/api/sku?action=rack-details&skuName=${encodeURIComponent(selectedSku)}${ent ? `&ent=${ent}` : ''}`);
         if (res.ok) {
           const data = await res.json();
           setRackOptions(data);
@@ -99,7 +106,7 @@ export default function InboundForm() {
     }
 
     loadRacks();
-  }, [selectedSku]);
+  }, [selectedSku, entity]);
 
   // Add allocation row (max 6)
   const addAllocationRow = () => {
@@ -156,9 +163,15 @@ export default function InboundForm() {
       }
     }
 
+    if (entity === 'ALL') {
+      setErrorMessage('Pilih entitas spesifik (BBB atau BBT) sebelum submit inbound.');
+      return;
+    }
+
     setSubmitting(true);
 
     const payload: any = {
+      entitas: entity,
       barcode: barcode || palletCode,
       namaBarang: selectedSku,
       totalQty,
@@ -200,6 +213,9 @@ export default function InboundForm() {
     }
   };
 
+  const entityLabel = entity === 'ALL' ? 'Semua Entitas' : entity;
+  const entityBadgeColor = ENTITY_COLORS[entity as 'BBB' | 'BBT' | 'ALL'] || ENTITY_COLORS.ALL;
+
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto px-4 py-6 max-w-3xl">
@@ -213,6 +229,9 @@ export default function InboundForm() {
             <h1 className="text-2xl font-bold tracking-tight">Form Inbound</h1>
             <p className="text-muted-foreground text-sm">Penerimaan & Alokasi Rak Barang Masuk</p>
           </div>
+          <span className={`ml-auto inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${entityBadgeColor.badge}`}>
+            Inbound — {entityLabel}
+          </span>
         </div>
 
         {errorMessage && (
@@ -272,9 +291,10 @@ export default function InboundForm() {
                       <SelectItem key="" value="" disabled>
                         Pilih Nama Barang
                       </SelectItem>
-                      {skuList.map((sku) => (
-                        <SelectItem key={sku} value={sku}>
-                          {sku}
+                      {skuList.map((skuItem) => (
+                        <SelectItem key={skuItem.namaBarang} value={skuItem.namaBarang}>
+                          {skuItem.namaBarang}
+                          {skuItem.entitas && <span className="ml-2 text-xs text-muted-foreground">({skuItem.entitas})</span>}
                         </SelectItem>
                       ))}
                     </SelectContent>

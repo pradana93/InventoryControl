@@ -254,13 +254,14 @@ export interface LedgerEntry {
   expiredDate: string;
   sjNumber: string;
   remarks: string;
+  entitas: 'BBB' | 'BBT';  // New column for entity
 }
 
 export async function getLedger(): Promise<LedgerEntry[]> {
   const rows = await readSheet(SHEETS.LEDGER);
   if (rows.length <= 1) return [];
   
-  // Header: Record_ID, Timestamp, SKU_Name, Rack_ID, Qty_In, Expired_Date, SJ_Number, Remarks
+  // Header: Record_ID, Timestamp, SKU_Name, Rack_ID, Qty_In, Expired_Date, SJ_Number, Remarks, Entitas
   return rows.slice(1)
     .filter(r => r[0] && r[2] && r[3])
     .map(r => ({
@@ -272,6 +273,7 @@ export async function getLedger(): Promise<LedgerEntry[]> {
       expiredDate: String(r[5] || '').trim(),
       sjNumber: String(r[6] || '').trim(),
       remarks: String(r[7] || '').trim(),
+      entitas: (String(r[8] || '').trim() as 'BBB' | 'BBT') || 'BBB',  // Default to BBB for old rows
     }));
 }
 
@@ -824,10 +826,22 @@ export async function getStockBySku(search?: string) {
     .sort((a, b) => a.namaBarang.localeCompare(b.namaBarang));
 }
 
-export async function getStockDetail(search?: string) {
-  const lots = await getInventoryLots();
+export async function getStockDetail(search: string = '', entity?: EntityFilter) {
+  const [lots, warehouse] = await Promise.all([
+    getInventoryLots(),
+    getWarehouse(),
+  ]);
+
+  const filteredWarehouse = entity && entity !== 'ALL'
+    ? warehouse.filter(w => w.entitas === entity)
+    : warehouse;
+  const entityRackIds = new Set(filteredWarehouse.map(w => w.rackId));
+
   return lots
-    .filter(l => !search || l.namaBarang.toLowerCase().includes(search.toLowerCase()) || l.nomorRak.toLowerCase().includes(search.toLowerCase()))
+    .filter(l => 
+      entityRackIds.has(l.nomorRak) &&
+      (!search || l.namaBarang.toLowerCase().includes(search.toLowerCase()) || l.nomorRak.toLowerCase().includes(search.toLowerCase()))
+    )
     .map(l => ({
       nomorRak: l.nomorRak,
       namaBarang: l.namaBarang,
@@ -845,6 +859,7 @@ export async function getStockDetail(search?: string) {
       barcode: l.barcode,
       category: l.category,
       unit: l.unit,
+      entitas: l.entitas,
     }))
     .sort((a, b) => a.namaBarang.localeCompare(b.namaBarang) || a.nomorRak.localeCompare(b.nomorRak));
 }
@@ -854,6 +869,7 @@ export async function getStockDetail(search?: string) {
 // ============================================================================
 
 export async function submitInbound(data: {
+  entitas: 'BBB' | 'BBT';
   barcode: string;
   namaBarang: string;
   totalQty: number;
@@ -868,15 +884,19 @@ export async function submitInbound(data: {
   rack6?: string; qtyRack6?: number;
   remarks: string;
 }) {
-  // Validate SKU exists in catalog
+  // Validate SKU exists in catalog and belongs to the entity
   const sku = await getSKUByName(data.namaBarang);
   if (!sku) {
     throw new Error(`SKU "${data.namaBarang}" tidak ditemukan di Catalog.`);
   }
+  if (sku.entitas !== data.entitas) {
+    throw new Error(`SKU "${data.namaBarang}" milik entitas ${sku.entitas}, tidak sesuai dengan entitas inbound ${data.entitas}.`);
+  }
 
-  // Validate racks exist in warehouse
+  // Validate racks exist in warehouse and belong to the entity
   const warehouse = await getWarehouse();
-  const validRacks = new Set(warehouse.map(w => w.rackId));
+  const entityWarehouse = warehouse.filter(w => w.entitas === data.entitas);
+  const validRacks = new Set(entityWarehouse.map(w => w.rackId));
   const racks = [
     { rack: data.rack1, qty: data.qtyRack1 || 0 },
     { rack: data.rack2, qty: data.qtyRack2 || 0 },
@@ -888,7 +908,7 @@ export async function submitInbound(data: {
 
   for (const { rack, qty } of racks) {
     if (rack && qty > 0 && !validRacks.has(rack)) {
-      throw new Error(`Rack "${rack}" tidak ditemukan di Physical_Warehouse.`);
+      throw new Error(`Rack "${rack}" tidak ditemukan atau tidak milik entitas ${data.entitas} di Physical_Warehouse.`);
     }
   }
 
@@ -907,6 +927,7 @@ export async function submitInbound(data: {
       data.tanggalKadaluarsa,
       data.nomorSJ || '',
       data.remarks || '',
+      data.entitas,  // Add entitas column
     ]);
     written++;
   }
