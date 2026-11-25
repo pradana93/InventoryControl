@@ -8,6 +8,7 @@ export const SHEETS = {
   CATALOG: 'Catalog',
   WAREHOUSE: 'Physical_Warehouse',
   LEDGER: 'Ledger',
+  STOCK_OPNAME: 'Stock_Opname',
   USERS: 'Users',
   // Legacy sheets kept for backward compatibility (read-only)
   LEGACY_INVENTORY: 'Inventory',
@@ -183,6 +184,140 @@ export async function getLedger(): Promise<LedgerEntry[]> {
 }
 
 // ============================================================================
+// STOCK OPNAME (Physical Count / Cycle Count)
+// ============================================================================
+
+export interface StockOpnameEntry {
+  rackId: string;
+  skuName: string;
+  qtySistem: number;
+  qtyFisikSOH: number;
+  variance: number;
+  akurasi: string;
+  tanggalOpname: string;
+  petugas: string;
+  catatan: string;
+}
+
+export async function getStockOpname(): Promise<StockOpnameEntry[]> {
+  const rows = await readSheet(SHEETS.STOCK_OPNAME);
+  if (rows.length <= 1) return [];
+  
+  // Header: Rack_ID, SKU_Name, Qty_Sistem, Qty_Fisik_SOH, Variance, Akurasi_%, Tanggal_Opname, Petugas, Catatan
+  return rows.slice(1)
+    .filter(r => r[0] && r[1])
+    .map(r => ({
+      rackId: String(r[0] || '').trim(),
+      skuName: String(r[1] || '').trim(),
+      qtySistem: parseFloat(String(r[2] || '0')) || 0,
+      qtyFisikSOH: parseFloat(String(r[3] || '0')) || 0,
+      variance: parseFloat(String(r[4] || '0')) || 0,
+      akurasi: String(r[5] || '100.00%').trim(),
+      tanggalOpname: String(r[6] || '').trim(),
+      petugas: String(r[7] || '').trim(),
+      catatan: String(r[8] || '').trim(),
+    }));
+}
+
+export async function updateStockOpnameSOH(rackId: string, skuName: string, qtyFisikSOH: number, petugas: string = '', catatan: string = ''): Promise<void> {
+  const client = await getSheetsClient();
+  const spreadsheetId = process.env.GOOGLE_SHEET_ID!;
+
+  // Read current opname to find the row
+  const rows = await readSheet(SHEETS.STOCK_OPNAME);
+  if (rows.length <= 1) return;
+
+  const rowIndex = rows.findIndex((r, i) => 
+    i > 0 && String(r[0] || '').trim() === rackId && String(r[1] || '').trim().toLowerCase() === skuName.toLowerCase()
+  );
+
+  if (rowIndex === -1) {
+    // Not found - append new row
+    const qtySistem = 0; // Will be recalculated
+    const variance = qtyFisikSOH - qtySistem;
+    const akurasi = qtySistem > 0 ? ((qtyFisikSOH / qtySistem) * 100).toFixed(2) + '%' : '100.00%';
+    const today = new Date().toLocaleDateString('en-GB').replace(/\//g, '-');
+    
+    await appendRow(SHEETS.STOCK_OPNAME, [
+      rackId, skuName, qtySistem, qtyFisikSOH, variance, akurasi, today, petugas, catatan
+    ]);
+  } else {
+    // Update existing row (rowIndex is 0-based, sheet row is 1-based + header)
+    const sheetRow = rowIndex + 1;
+    const currentSistem = parseFloat(String(rows[rowIndex][2] || '0')) || 0;
+    const variance = qtyFisikSOH - currentSistem;
+    const akurasi = currentSistem > 0 ? ((qtyFisikSOH / currentSistem) * 100).toFixed(2) + '%' : '100.00%';
+    const today = new Date().toLocaleDateString('en-GB').replace(/\//g, '-');
+    
+    // Update columns D (Qty_Fisik_SOH), E (Variance), F (Akurasi), G (Tanggal), H (Petugas), I (Catatan)
+    await client.spreadsheets.values.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        valueInputOption: 'USER_ENTERED',
+        data: [
+          { range: `${SHEETS.STOCK_OPNAME}!D${sheetRow}`, values: [[qtyFisikSOH]] },
+          { range: `${SHEETS.STOCK_OPNAME}!E${sheetRow}`, values: [[variance]] },
+          { range: `${SHEETS.STOCK_OPNAME}!F${sheetRow}`, values: [[akurasi]] },
+          { range: `${SHEETS.STOCK_OPNAME}!G${sheetRow}`, values: [[today]] },
+          { range: `${SHEETS.STOCK_OPNAME}!H${sheetRow}`, values: [[petugas]] },
+          { range: `${SHEETS.STOCK_OPNAME}!I${sheetRow}`, values: [[catatan]] },
+        ],
+      },
+    });
+  }
+}
+
+export async function syncStockOpnameWithSystem(): Promise<void> {
+  // Recalculate Qty_Sistem for all opname rows from Ledger
+  const [ledger, opname] = await Promise.all([getLedger(), getStockOpname()]);
+  
+  // Aggregate ledger by rack+sku
+  const systemMap = new Map<string, number>();
+  for (const l of ledger) {
+    const key = `${l.rackId}|${l.skuName.toLowerCase()}`;
+    systemMap.set(key, (systemMap.get(key) || 0) + l.qtyIn);
+  }
+
+  const client = await getSheetsClient();
+  const spreadsheetId = process.env.GOOGLE_SHEET_ID!;
+  const rows = await readSheet(SHEETS.STOCK_OPNAME);
+  if (rows.length <= 1) return;
+
+  const updates = [];
+  
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    const rackId = String(r[0] || '').trim();
+    const skuName = String(r[1] || '').trim();
+    if (!rackId || !skuName) continue;
+    
+    const key = `${rackId}|${skuName.toLowerCase()}`;
+    const newSistem = systemMap.get(key) || 0;
+    const currentSistem = parseFloat(String(r[2] || '0')) || 0;
+    const fisik = parseFloat(String(r[3] || '0')) || 0;
+    
+    if (newSistem !== currentSistem) {
+      const variance = fisik - newSistem;
+      const akurasi = newSistem > 0 ? ((fisik / newSistem) * 100).toFixed(2) + '%' : '100.00%';
+      const sheetRow = i + 1;
+      
+      updates.push(
+        { range: `${SHEETS.STOCK_OPNAME}!C${sheetRow}`, values: [[newSistem]] },
+        { range: `${SHEETS.STOCK_OPNAME}!E${sheetRow}`, values: [[variance]] },
+        { range: `${SHEETS.STOCK_OPNAME}!F${sheetRow}`, values: [[akurasi]] }
+      );
+    }
+  }
+
+  if (updates.length > 0) {
+    await client.spreadsheets.values.batchUpdate({
+      spreadsheetId,
+      requestBody: { valueInputOption: 'USER_ENTERED', data: updates },
+    });
+  }
+}
+
+// ============================================================================
 // INVENTORY COMPUTATION (Calculated from Ledger + Warehouse + Catalog)
 // ============================================================================
 
@@ -232,16 +367,24 @@ function calculateFEFOStatus(daysToExpiry: number, qtySistem: number): string {
 }
 
 export async function getInventoryLots(): Promise<InventoryLot[]> {
-  const [ledger, catalog, warehouse] = await Promise.all([
+  const [ledger, catalog, warehouse, opname] = await Promise.all([
     getLedger(),
     getCatalog(),
     getWarehouse(),
+    getStockOpname(),
   ]);
 
   // Build lookup maps
   const catalogByName = new Map(catalog.map(c => [c.namaBarang.toLowerCase(), c]));
   const catalogById = new Map(catalog.map(c => [c.skuId, c]));
   const warehouseByRack = new Map(warehouse.map(w => [w.rackId, w]));
+  
+  // Build Stock Opname lookup: key = "RACK|SKU"
+  const opnameMap = new Map<string, StockOpnameEntry>();
+  for (const o of opname) {
+    const key = `${o.rackId}|${o.skuName.toLowerCase()}`;
+    opnameMap.set(key, o);
+  }
 
   // Aggregate ledger by (SKU + Rack + Expiry) - FEFO grouping
   const lotMap = new Map<string, {
@@ -316,6 +459,13 @@ export async function getInventoryLots(): Promise<InventoryLot[]> {
         const latestTimestamp = lot.timestamps.sort().reverse()[0] || '-';
         const earliestExpiry = lot.expiryDates.sort()[0] || '-';
         
+        // Look up Stock Opname for this rack+sku
+        const opnameKey = `${rack.rackId}|${(skuName || '').toLowerCase()}`;
+        const opnameEntry = opnameMap.get(opnameKey);
+        const soh = opnameEntry?.qtyFisikSOH || 0;
+        const variance = soh - lot.qtyIn;
+        const akurasi = lot.qtyIn > 0 ? ((soh / lot.qtyIn) * 100) : 100;
+        
         lots.push({
           nomorRak: rack.rackId,
           namaBarang: skuName || '-',
@@ -324,9 +474,9 @@ export async function getInventoryLots(): Promise<InventoryLot[]> {
           tanggalExpired: earliestExpiry,
           expiredLabel: formatDateShort(earliestExpiry),
           daysToExpiry: calculateDaysToExpiry(earliestExpiry),
-          soh: 0, // SOH comes from physical count
-          variance: 0,
-          akurasi: 100,
+          soh,
+          variance,
+          akurasi: Math.round(akurasi * 100) / 100,
           statusFefo: calculateFEFOStatus(calculateDaysToExpiry(earliestExpiry), lot.qtyIn),
           urutanFefo: 0,
           stockPicking: 0,
@@ -396,13 +546,20 @@ export async function getFullDashboard() {
   // Empty racks
   const emptyRacks = lots.filter(l => l.qtySistem === 0).length;
 
+  // Calculate real variance and accuracy from Stock Opname
+  const lotsWithOpname = lots.filter(l => l.qtySistem > 0 || l.soh > 0);
+  const totalVariance = lotsWithOpname.reduce((sum, l) => sum + l.variance, 0);
+  const avgAccuracy = lotsWithOpname.length > 0 
+    ? lotsWithOpname.reduce((sum, l) => sum + l.akurasi, 0) / lotsWithOpname.length 
+    : 100;
+
   return {
     summary: {
       totalSKU,
       totalSystemQty,
       totalSOH,
-      variance: 0,
-      accuracy: 100,
+      variance: Math.round(totalVariance),
+      accuracy: Math.round(avgAccuracy * 100) / 100,
       expiredCount: expiredLots.length,
       expiringCount: expiringSoon.length,
       outOfStockCount: emptyRacks,
