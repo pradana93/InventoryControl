@@ -25,21 +25,37 @@ export async function POST(request: Request) {
       getCatalog(),
     ]);
 
-    // Build active stock by SKU + Rack + Expiry (FEFO)
-    // Only lots with qtyIn > 0 (stock on hand)
-    const stockLots = ledger
-      .filter(l => l.qtyIn > 0)
-      .map(l => {
-        // Find current remaining qty (could be reduced by previous outbound)
-        // For now, assume all ledger qtyIn is available (simplified)
-        return {
-          rackId: l.rackId,
-          skuName: l.skuName,
-          qty: l.qtyIn,
-          expiredDate: l.expiredDate,
-          expiredLabel: formatDateShort(l.expiredDate),
-        };
-      });
+    // Build active stock lot-by-lot, netting inbound (positive) against
+    // outbound (negative) so repeat runs never over-allocate.
+    // Key: SKU + Rack + Expiry identifies a "lot".
+    interface Lot { rackId: string; skuName: string; qty: number; expiredDate: string; expiredLabel: string; }
+    const lotMap = new Map<string, Lot>();
+
+    // Sort ledger oldest-first so outbound consumes the same lots FEFO would pick.
+    const sortedLedger = [...ledger].sort((a, b) => {
+      const da = new Date(a.timestamp || 0).getTime();
+      const db = new Date(b.timestamp || 0).getTime();
+      return da - db;
+    });
+
+    for (const entry of sortedLedger) {
+      const key = `${entry.skuName.toLowerCase()}|${entry.rackId}|${entry.expiredDate || ''}`;
+      if (!lotMap.has(key)) {
+        lotMap.set(key, {
+          rackId: entry.rackId,
+          skuName: entry.skuName,
+          qty: 0,
+          expiredDate: entry.expiredDate,
+          expiredLabel: formatDateShort(entry.expiredDate),
+        });
+      }
+      const lot = lotMap.get(key)!;
+      // qtyIn is positive for inbound, negative for outbound (see confirm route).
+      lot.qty += Number(entry.qtyIn) || 0;
+    }
+
+    // Only keep lots that still have stock on hand.
+    const stockLots = Array.from(lotMap.values()).filter(l => l.qty > 0);
 
     // Aggregate by SKU -> Rack -> Expiry
     const skuRackExpiry = new Map<string, Array<{
@@ -140,6 +156,6 @@ function formatDateShort(iso: string): string {
   if (!iso) return '-';
   const d = new Date(iso + 'T00:00:00');
   if (isNaN(d.getTime())) return iso;
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des'];
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
 }

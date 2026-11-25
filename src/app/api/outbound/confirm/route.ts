@@ -27,8 +27,11 @@ export async function POST(request: Request) {
     const client = await getSheetsClient();
     const spreadsheetId = process.env.GOOGLE_SHEET_ID!;
 
-    // Generate picking list number
-    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    // Generate picking list number (YYMMDD format)
+    const now = new Date();
+    const dateStr = now.getFullYear().toString().slice(-2) + 
+                    String(now.getMonth() + 1).padStart(2, '0') + 
+                    String(now.getDate()).padStart(2, '0');
     const timestamp = Date.now().toString().slice(-6);
     const pickingListNo = `PL-${dateStr}-${timestamp}`;
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,6 +25,7 @@ import {
   Eye,
   FileSpreadsheet,
   Printer,
+  X,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 
@@ -60,6 +61,12 @@ interface ConfirmedResult {
   allocations: AllocationResult[];
 }
 
+interface Toast {
+  id: string;
+  type: 'success' | 'error';
+  message: string;
+}
+
 export default function OutboundPage() {
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [parsedLines, setParsedLines] = useState<ParsedLine[]>([]);
@@ -68,6 +75,7 @@ export default function OutboundPage() {
   const [allocations, setAllocations] = useState<AllocationResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // RO confirmation dialog state
@@ -80,6 +88,41 @@ export default function OutboundPage() {
 
   // Confirmed picking list state
   const [confirmed, setConfirmed] = useState<ConfirmedResult | null>(null);
+
+  // Toast notifications
+  const addToast = (type: 'success' | 'error', message: string) => {
+    const id = Date.now().toString();
+    setToasts(prev => [...prev, { id, type, message }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000);
+  };
+
+  // Remove toast
+  const removeToast = (id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+Enter to confirm allocation
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        if (allocations.length > 0 && !confirmed && allocations.length > 0) {
+          e.preventDefault();
+          openConfirmDialog();
+        }
+        if (confirmed) {
+          e.preventDefault();
+          handleExportExcel();
+        }
+      }
+      // Escape to close dialog
+      if (e.key === 'Escape') {
+        setRoDialogOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [allocations, confirmed]);
 
   // Parse quantity string with Indonesian formatting support
   function parseQty(raw: string): number {
@@ -132,7 +175,7 @@ export default function OutboundPage() {
       const lines = fullText.split('\n').filter(l => l.trim().length > 3);
       const cells = lines.join(' | ').split('|').map(c => c.trim()).filter(c => c.length > 0);
 
-      // Try to extract RO metadata from the PDF header (nice-to-have auto-fill)
+      // Try to extract RO metadata from the PDF header
       const headerText = cells.join(' ');
       const roMatch = headerText.match(/(?:No\.?\s*(?:SO|RO|Order)|SO|RO)\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-\/]{4,})/i);
       if (roMatch && !roNumber) setRoNumber(roMatch[1].trim());
@@ -182,11 +225,16 @@ export default function OutboundPage() {
       setParsedLines(parsed);
       if (parsed.length === 0) {
         setError('Tidak ditemukan data order yang valid di PDF.');
+        addToast('error', 'Tidak ditemukan data order yang valid di PDF.');
       } else {
-        setSuccess(`Berhasil mengekstrak ${parsed.length} baris order. ${parsed.filter(p => p.matched).length} cocok dengan katalog.`);
+        const matchedCount = parsed.filter(p => p.matched).length;
+        setSuccess(`Berhasil mengekstrak ${parsed.length} baris order. ${matchedCount} cocok dengan katalog.`);
+        addToast('success', `Berhasil mengekstrak ${parsed.length} baris order. ${matchedCount} cocok.`);
       }
     } catch (e) {
-      setError('Gagal parsing PDF: ' + (e as Error).message);
+      const msg = 'Gagal parsing PDF: ' + (e as Error).message;
+      setError(msg);
+      addToast('error', msg);
     } finally {
       setParsing(false);
     }
@@ -201,6 +249,7 @@ export default function OutboundPage() {
       const linesToAllocate = parsedLines.filter(p => p.matched && p.matchedSkuId);
       if (linesToAllocate.length === 0) {
         setError('Tidak ada baris yang cocok dengan katalog. Periksa matching.');
+        addToast('error', 'Tidak ada baris yang cocok dengan katalog.');
         return;
       }
       
@@ -214,9 +263,13 @@ export default function OutboundPage() {
       
       const data = await res.json();
       setAllocations(data.allocations);
-      setSuccess(`Alokasi selesai: ${data.allocations.length} pick points dari ${linesToAllocate.length} SKU.`);
+      const msg = `Alokasi selesai: ${data.allocations.length} pick points dari ${linesToAllocate.length} SKU.`;
+      setSuccess(msg);
+      addToast('success', msg);
     } catch (e) {
-      setError('Gagal alokasi: ' + (e as Error).message);
+      const msg = 'Gagal alokasi: ' + (e as Error).message;
+      setError(msg);
+      addToast('error', msg);
     } finally {
       setAllocating(false);
     }
@@ -265,14 +318,18 @@ export default function OutboundPage() {
       });
 
       setRoDialogOpen(false);
-      setSuccess(`Outbound dikonfirmasi! Picking List #${data.pickingListNo} untuk RO ${data.roNumber} dibuat. ${data.ledgerEntries} entri Ledger ditulis.`);
+      const msg = `Outbound dikonfirmasi! Picking List #${data.pickingListNo} untuk RO ${data.roNumber} dibuat.`;
+      setSuccess(msg);
+      addToast('success', msg);
       
       // Keep allocations for the export view but clear the upload step
       setParsedLines([]);
       setPdfFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (e) {
-      setRoError('Gagal konfirmasi: ' + (e as Error).message);
+      const msg = 'Gagal konfirmasi: ' + (e as Error).message;
+      setRoError(msg);
+      addToast('error', msg);
     } finally {
       setAllocating(false);
     }
@@ -333,6 +390,35 @@ export default function OutboundPage() {
       <h1 className="text-2xl font-bold flex items-center gap-2">
         <FileText className="h-6 w-6" /> Outbound & Picking List
       </h1>
+
+      {/* Toasts */}
+      <div className="fixed top-6 right-6 z-50 flex flex-col gap-2 pointer-events-none">
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            className={`pointer-events-auto flex items-start gap-3 p-4 rounded-lg shadow-lg border min-w-[350px] max-w-md ${
+              t.type === 'success'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                : 'bg-destructive/10 border-destructive/20 text-destructive'
+            }`}
+          >
+            {t.type === 'success' ? (
+              <CheckCircle2 className="h-5 w-5 flex-shrink-0 mt-0.5 text-emerald-600" />
+            ) : (
+              <AlertTriangle className="h-5 w-5 flex-shrink-0 mt-0.5 text-destructive" />
+            )}
+            <div className="flex-1">
+              <p className="text-sm font-medium">{t.message}</p>
+            </div>
+            <button
+              onClick={() => removeToast(t.id)}
+              className="ml-2 opacity-50 hover:opacity-100"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        ))}
+      </div>
 
       {/* Confirmed Result View */}
       {confirmed ? (
