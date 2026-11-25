@@ -63,7 +63,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error('Inbound API error:', error);
     return NextResponse.json(
-      { error: 'Gagal menyimpan data inbound' },
+      { error: 'Gagal menyimpan data inbound', detail: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     );
   }
