@@ -31,7 +31,9 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
-import { useEntity, ENTITY_COLORS, PT_PATTERNS } from '@/lib/constants';
+import { ENTITY_COLORS, PT_PATTERNS } from '@/lib/constants';
+import { useEntity } from '@/hooks/useEntity';
+import { Suspense } from 'react';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `/pdf.worker.min.mjs`;
 
@@ -387,7 +389,6 @@ function OutboundPageContent() {
         roDate: data.roDate,
         ledgerEntries: data.ledgerEntries,
         allocations,
-        entitas: ent,
       });
 
       setRoDialogOpen(false);
