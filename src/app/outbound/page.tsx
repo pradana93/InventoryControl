@@ -41,6 +41,22 @@ export default function OutboundPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Parse quantity string with Indonesian formatting support
+  function parseQty(raw: string): number {
+    if (!raw) return NaN;
+    const s = raw.trim();
+    if (s.includes('.') && s.includes(',')) {
+      return parseFloat(s.replace(/\./g, '').replace(',', '.'));
+    }
+    if (s.includes(',')) {
+      return parseFloat(s.replace(',', '.'));
+    }
+    if (/^\d{1,3}(\.\d{3})+$/.test(s)) {
+      return parseFloat(s.replace(/\./g, ''));
+    }
+    return parseFloat(s);
+  }
+
   // Fuzzy match SKU name against catalog
   function fuzzyMatch(skuName: string, catalog: any[]) {
     const cleanInput = skuName.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -56,7 +72,7 @@ export default function OutboundPage() {
     return best;
   }
 
-  // Parse PDF using pdfjs-dist
+  // Parse PDF using pdfjs-dist with robust state-machine parser for Accurate exports
   async function parsePdf(file: File) {
     setParsing(true);
     setError(null);
@@ -69,70 +85,58 @@ export default function OutboundPage() {
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
         const content = await page.getTextContent();
-        const strings = content.items.map((item: any) => item.str).join(' ');
+        const strings = content.items.map((item: any) => item.str).join(' | ');
         fullText += strings + '\n';
       }
 
-      // Parse lines looking for SKU patterns
       const lines = fullText.split('\n').filter(l => l.trim().length > 3);
-      const parsed: ParsedLine[] = [];
+      const cells = lines.join(' | ').split('|').map(c => c.trim()).filter(c => c.length > 0);
       
-      // Try to find table-like structures with SKU + Qty
-      // Common Accurate format: "Nama Barang" | "Qty" or similar
       const catalogRes = await fetch('/api/sku?action=names');
       const catalog = catalogRes.ok ? await catalogRes.json() : [];
-      
-      let index = 0;
-      for (const line of lines) {
-        // Look for patterns: SKU name followed by number (qty)
-        // This is heuristic - will need tuning based on actual PDF format
-        const qtyMatch = line.match(/(\d+[.,]?\d*)\s*$/);
-        const skuPart = qtyMatch ? line.slice(0, qtyMatch.index).trim() : line;
-        
-        if (skuPart.length > 2 && qtyMatch) {
-          const qty = parseFloat(qtyMatch[1].replace(',', '.'));
-          if (!isNaN(qty) && qty > 0) {
-            const match = fuzzyMatch(skuPart, catalog);
-            parsed.push({
-              index: index++,
-              skuName: skuPart,
-              qtyOrdered: qty,
-              matched: !!match.sku,
-              matchConfidence: match.score,
-              matchedSkuId: match.sku?.skuId,
-              suggestion: match.sku?.namaBarang,
-            });
-          }
+
+      const startIdx = cells.findIndex(c => c.toLowerCase().includes('kuantitas') || c.toLowerCase().includes('pck'));
+      const tableCells = startIdx !== -1 ? cells.slice(startIdx + 1) : cells;
+
+      const rawItems: Record<string, number> = {};
+      const unitKeywords = ['pcs', 'pack', 'dus', 'bks', 'jrg', 'ikat', 'dus40'];
+      let currentItem = '';
+
+      for (let i = 0; i < tableCells.length; i++) {
+        const cell = tableCells[i];
+        if (!cell) continue;
+        if (cell.includes('ACCURATE') || cell.includes('Page Break') || cell.includes('Printed on') || cell.includes('Rincian')) continue;
+        if (['nama barang', 'satuan', 'kuantitas', 'dus-20', 'jrg', 'pck'].includes(cell.toLowerCase())) continue;
+
+        const num = parseQty(cell);
+        const isUnit = unitKeywords.some(u => cell.toLowerCase().startsWith(u));
+
+        if (!isNaN(num) && num > 0 && currentItem) {
+          rawItems[currentItem] = (rawItems[currentItem] || 0) + num;
+        } else if (!isUnit && isNaN(num) && cell.length > 1) {
+          currentItem = cell;
         }
       }
-      
-      if (parsed.length === 0) {
-        // Fallback: try to extract any product-like lines
-        for (const line of lines) {
-          const parts = line.split(/\s{2,}|\t/).filter(p => p.trim());
-          if (parts.length >= 2) {
-            const lastPart = parts[parts.length - 1];
-            const qty = parseFloat(lastPart.replace(',', '.'));
-            const skuPart = parts.slice(0, -1).join(' ');
-            if (!isNaN(qty) && qty > 0 && skuPart.length > 2) {
-              const match = fuzzyMatch(skuPart, catalog);
-              parsed.push({
-                index: index++,
-                skuName: skuPart,
-                qtyOrdered: qty,
-                matched: !!match.sku,
-                matchConfidence: match.score,
-                matchedSkuId: match.sku?.skuId,
-                suggestion: match.sku?.namaBarang,
-              });
-            }
-          }
-        }
+
+      const parsed: ParsedLine[] = [];
+      let index = 0;
+
+      for (const [skuName, qtyOrdered] of Object.entries(rawItems)) {
+        const match = fuzzyMatch(skuName, catalog);
+        parsed.push({
+          index: index++,
+          skuName,
+          qtyOrdered,
+          matched: !!match.sku,
+          matchConfidence: match.score,
+          matchedSkuId: match.sku?.skuId,
+          suggestion: match.sku?.namaBarang,
+        });
       }
       
       setParsedLines(parsed);
       if (parsed.length === 0) {
-        setError('Tidak ditemukan data order yang valid di PDF. Coba format lain atau masukkan manual.');
+        setError('Tidak ditemukan data order yang valid di PDF.');
       } else {
         setSuccess(`Berhasil mengekstrak ${parsed.length} baris order. ${parsed.filter(p => p.matched).length} cocok dengan katalog.`);
       }
@@ -189,7 +193,6 @@ export default function OutboundPage() {
       const data = await res.json();
       setSuccess(`Outbound dikonfirmasi! Picking List #${data.pickingListNo} dibuat. ${data.ledgerEntries} entri Ledger ditulis.`);
       
-      // Reset form
       setParsedLines([]);
       setAllocations([]);
       setPdfFile(null);
@@ -336,9 +339,7 @@ export default function OutboundPage() {
                       </TableCell>
                       <TableCell>
                         {!line.matched && (
-                          <Button variant="outline" size="sm" onClick={() => {
-                            // Manual search could be added here
-                          }}>
+                          <Button variant="outline" size="sm" onClick={() => {}}>
                             Cari
                           </Button>
                         )}
