@@ -1,21 +1,20 @@
 import { google, sheets_v4 } from 'googleapis';
 import { JWT } from 'google-auth-library';
 
-// Sheet names matching the original workbook
+// ============================================================================
+// NEW ARCHITECTURE SHEET NAMES
+// ============================================================================
 export const SHEETS = {
-  DASHBOARD: 'Dasboard',
-  INVENTORY: 'Inventory',
-  MASTER: 'Master Data',
-  INBOUND: 'Inbound',
-  OUTBOUND: 'Outbound',
-  OUTB_REQ: 'Outbound Request',
-  PICKING: 'Picking List',
+  CATALOG: 'Catalog',
+  WAREHOUSE: 'Physical_Warehouse',
+  LEDGER: 'Ledger',
   USERS: 'Users',
+  // Legacy sheets kept for backward compatibility (read-only)
+  LEGACY_INVENTORY: 'Inventory',
+  LEGACY_INBOUND: 'Inbound',
+  LEGACY_DASHBOARD: 'Dasboard',
+  LEGACY_MASTER: 'Master Data',
 } as const;
-
-// Inventory sheet layout (1-indexed, header row = 3, data starts row 4)
-const INV_HEADER_ROW = 3;
-const INV_FIRST_ROW = 4;
 
 let sheetsClient: sheets_v4.Sheets | null = null;
 
@@ -65,9 +64,587 @@ export async function updateRange(sheetName: string, range: string, values: (str
 }
 
 // ============================================================================
-//  MASTER DATA HELPERS
+// CATALOG (SKU Master Data)
 // ============================================================================
 
+export interface CatalogEntry {
+  skuId: string;
+  namaBarang: string;
+  satuan: string;
+  kategori: string;
+  status: string;
+  barcode: string;
+}
+
+export async function getCatalog(): Promise<CatalogEntry[]> {
+  const rows = await readSheet(SHEETS.CATALOG);
+  if (rows.length <= 1) return [];
+  
+  // Header: SKU_ID, Nama Barang, Satuan, Kategori, Status
+  return rows.slice(1)
+    .filter(r => r[0] && r[1])
+    .map((r, i) => ({
+      skuId: String(r[0] || `SKU-${String(i + 1).padStart(3, '0')}`).trim(),
+      namaBarang: String(r[1] || '').trim(),
+      satuan: String(r[2] || 'Pcs').trim(),
+      kategori: String(r[3] || 'General').trim(),
+      status: String(r[4] || 'Active').trim(),
+      barcode: String(r[5] || '').trim(),
+    }));
+}
+
+export async function getSKUNames(): Promise<string[]> {
+  const catalog = await getCatalog();
+  return catalog.filter(c => c.status === 'Active').map(c => c.namaBarang).sort();
+}
+
+export async function getSKUById(skuId: string): Promise<CatalogEntry | null> {
+  const catalog = await getCatalog();
+  return catalog.find(c => c.skuId === skuId) || null;
+}
+
+export async function getSKUByName(namaBarang: string): Promise<CatalogEntry | null> {
+  const catalog = await getCatalog();
+  return catalog.find(c => c.namaBarang.toLowerCase() === namaBarang.toLowerCase()) || null;
+}
+
+// ============================================================================
+// WAREHOUSE (Physical Rack Layout)
+// ============================================================================
+
+export interface WarehouseRack {
+  rackId: string;
+  jenisLokasi: string;
+  entitas: string;
+  status: string;
+}
+
+export async function getWarehouse(): Promise<WarehouseRack[]> {
+  const rows = await readSheet(SHEETS.WAREHOUSE);
+  if (rows.length <= 1) return [];
+  
+  // Header: Rack_ID, Jenis Lokasi, Entitas, Status
+  return rows.slice(1)
+    .filter(r => r[0])
+    .map(r => ({
+      rackId: String(r[0] || '').trim(),
+      jenisLokasi: String(r[1] || 'RACKING').trim(),
+      entitas: String(r[2] || 'Default').trim(),
+      status: String(r[3] || 'Active').trim(),
+    }));
+}
+
+export async function getActiveRacks(): Promise<WarehouseRack[]> {
+  const warehouse = await getWarehouse();
+  return warehouse.filter(r => r.status === 'Active');
+}
+
+export function getZoneLabels(): Record<string, string> {
+  return {
+    'RACKING': 'Zona Racking',
+    'FLOOR': 'Zona Floor',
+    'CONTAINER': 'Zona Container',
+    'FREEZER': 'Zona Freezer',
+  };
+}
+
+// ============================================================================
+// LEDGER (Transaction Log - Source of Truth)
+// ============================================================================
+
+export interface LedgerEntry {
+  recordId: string;
+  timestamp: string;
+  skuName: string;
+  rackId: string;
+  qtyIn: number;
+  expiredDate: string;
+  sjNumber: string;
+  remarks: string;
+}
+
+export async function getLedger(): Promise<LedgerEntry[]> {
+  const rows = await readSheet(SHEETS.LEDGER);
+  if (rows.length <= 1) return [];
+  
+  // Header: Record_ID, Timestamp, SKU_Name, Rack_ID, Qty_In, Expired_Date, SJ_Number, Remarks
+  return rows.slice(1)
+    .filter(r => r[0] && r[2] && r[3])
+    .map(r => ({
+      recordId: String(r[0] || '').trim(),
+      timestamp: String(r[1] || '').trim(),
+      skuName: String(r[2] || '').trim(),
+      rackId: String(r[3] || '').trim(),
+      qtyIn: parseFloat(String(r[4] || '0')) || 0,
+      expiredDate: String(r[5] || '').trim(),
+      sjNumber: String(r[6] || '').trim(),
+      remarks: String(r[7] || '').trim(),
+    }));
+}
+
+// ============================================================================
+// INVENTORY COMPUTATION (Calculated from Ledger + Warehouse + Catalog)
+// ============================================================================
+
+export interface InventoryLot {
+  nomorRak: string;
+  namaBarang: string;
+  qtySistem: number;
+  tanggalInbound: string;
+  tanggalExpired: string;
+  expiredLabel: string;
+  daysToExpiry: number;
+  soh: number;
+  variance: number;
+  akurasi: number;
+  statusFefo: string;
+  urutanFefo: number;
+  stockPicking: number;
+  barcode: string;
+  category: string;
+  unit: string;
+  skuId: string;
+  jenisLokasi: string;
+  entitas: string;
+}
+
+function formatDateShort(iso: string): string {
+  if (!iso) return '-';
+  const d = new Date(iso + 'T00:00:00');
+  if (isNaN(d.getTime())) return iso;
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des'];
+  return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+function calculateDaysToExpiry(expiredDate: string): number {
+  if (!expiredDate) return 9999;
+  const expDate = new Date(expiredDate + 'T00:00:00');
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((expDate.getTime() - today.getTime()) / 86400000);
+}
+
+function calculateFEFOStatus(daysToExpiry: number, qtySistem: number): string {
+  if (qtySistem <= 0) return 'HABIS';
+  if (daysToExpiry < 0) return 'EXPIRED';
+  if (daysToExpiry === 0) return 'EXPIRED HARI INI';
+  return 'OK';
+}
+
+export async function getInventoryLots(): Promise<InventoryLot[]> {
+  const [ledger, catalog, warehouse] = await Promise.all([
+    getLedger(),
+    getCatalog(),
+    getWarehouse(),
+  ]);
+
+  // Build lookup maps
+  const catalogByName = new Map(catalog.map(c => [c.namaBarang.toLowerCase(), c]));
+  const catalogById = new Map(catalog.map(c => [c.skuId, c]));
+  const warehouseByRack = new Map(warehouse.map(w => [w.rackId, w]));
+
+  // Aggregate ledger by (SKU + Rack + Expiry) - FEFO grouping
+  const lotMap = new Map<string, {
+    qtyIn: number;
+    timestamps: string[];
+    expiryDates: string[];
+    sjNumbers: string[];
+  }>();
+
+  for (const entry of ledger) {
+    const key = `${entry.skuName.toLowerCase()}|${entry.rackId}|${entry.expiredDate}`;
+    if (!lotMap.has(key)) {
+      lotMap.set(key, {
+        qtyIn: 0,
+        timestamps: [],
+        expiryDates: [],
+        sjNumbers: [],
+      });
+    }
+    const lot = lotMap.get(key)!;
+    lot.qtyIn += entry.qtyIn;
+    lot.timestamps.push(entry.timestamp);
+    lot.expiryDates.push(entry.expiredDate);
+    lot.sjNumbers.push(entry.sjNumber);
+  }
+
+  // Build inventory lots from aggregated ledger + warehouse
+  const lots: InventoryLot[] = [];
+
+  // Ensure ALL racks from warehouse are represented (even empty ones)
+  const rackSkuMap = new Map<string, string>(); // rack -> skuName from ledger
+  for (const entry of ledger) {
+    if (!rackSkuMap.has(entry.rackId) || entry.qtyIn > 0) {
+      rackSkuMap.set(entry.rackId, entry.skuName);
+    }
+  }
+
+  for (const rack of warehouse) {
+    const skuName = rackSkuMap.get(rack.rackId);
+    const catalogEntry = skuName ? catalogByName.get(skuName.toLowerCase()) : null;
+    
+    const lotEntries = Array.from(lotMap.entries())
+      .filter(([key]) => key.startsWith(`${(skuName || '').toLowerCase()}|${rack.rackId}|`))
+      .map(([, value]) => value);
+
+    if (lotEntries.length === 0 && !skuName) {
+      // Empty rack - still show in inventory
+      lots.push({
+        nomorRak: rack.rackId,
+        namaBarang: '-',
+        qtySistem: 0,
+        tanggalInbound: '-',
+        tanggalExpired: '-',
+        expiredLabel: '-',
+        daysToExpiry: 9999,
+        soh: 0,
+        variance: 0,
+        akurasi: 100,
+        statusFefo: 'OK',
+        urutanFefo: 0,
+        stockPicking: 0,
+        barcode: '',
+        category: '',
+        unit: 'Pcs',
+        skuId: '',
+        jenisLokasi: rack.jenisLokasi,
+        entitas: rack.entitas,
+      });
+    } else if (lotEntries.length > 0) {
+      // Has transactions - create lots per expiry batch (FEFO)
+      for (const lot of lotEntries) {
+        const latestTimestamp = lot.timestamps.sort().reverse()[0] || '-';
+        const earliestExpiry = lot.expiryDates.sort()[0] || '-';
+        
+        lots.push({
+          nomorRak: rack.rackId,
+          namaBarang: skuName || '-',
+          qtySistem: lot.qtyIn,
+          tanggalInbound: latestTimestamp,
+          tanggalExpired: earliestExpiry,
+          expiredLabel: formatDateShort(earliestExpiry),
+          daysToExpiry: calculateDaysToExpiry(earliestExpiry),
+          soh: 0, // SOH comes from physical count
+          variance: 0,
+          akurasi: 100,
+          statusFefo: calculateFEFOStatus(calculateDaysToExpiry(earliestExpiry), lot.qtyIn),
+          urutanFefo: 0,
+          stockPicking: 0,
+          barcode: catalogEntry?.barcode || '',
+          category: catalogEntry?.kategori || '',
+          unit: catalogEntry?.satuan || 'Pcs',
+          skuId: catalogEntry?.skuId || '',
+          jenisLokasi: rack.jenisLokasi,
+          entitas: rack.entitas,
+        });
+      }
+    }
+  }
+
+  // Sort: Active stock first (by expiry), then empty racks
+  return lots.sort((a, b) => {
+    if (a.qtySistem > 0 && b.qtySistem === 0) return -1;
+    if (a.qtySistem === 0 && b.qtySistem > 0) return 1;
+    if (a.qtySistem > 0 && b.qtySistem > 0) return a.daysToExpiry - b.daysToExpiry;
+    return a.nomorRak.localeCompare(b.nomorRak);
+  });
+}
+
+// ============================================================================
+// DASHBOARD AGGREGATIONS
+// ============================================================================
+
+export async function getFullDashboard() {
+  const [lots, warehouse, catalog] = await Promise.all([
+    getInventoryLots(),
+    getWarehouse(),
+    getCatalog(),
+  ]);
+
+  const activeLots = lots.filter(l => l.qtySistem > 0);
+  const skusWithStock = new Set(activeLots.map(l => l.namaBarang).filter(Boolean));
+  const totalSKU = skusWithStock.size;
+
+  const totalSystemQty = lots.reduce((sum, l) => sum + l.qtySistem, 0);
+  const totalSOH = lots.reduce((sum, l) => sum + l.soh, 0);
+
+  // Expired/Expiring
+  const expiredLots = activeLots.filter(l => l.statusFefo === 'EXPIRED' || l.statusFefo === 'EXPIRED HARI INI');
+  const expiringSoon = activeLots.filter(l => l.daysToExpiry >= 0 && l.daysToExpiry <= 30 && l.statusFefo !== 'HABIS');
+
+  // Zone distribution from Warehouse
+  const zoneMap: Record<string, number> = {};
+  for (const lot of activeLots) {
+    const zone = lot.jenisLokasi || 'Unknown';
+    zoneMap[zone] = (zoneMap[zone] || 0) + lot.qtySistem;
+  }
+  const zoneLabels = getZoneLabels();
+  const zoneDistribution = Object.entries(zoneMap)
+    .map(([zone, qty]) => ({ zone: zoneLabels[zone] || zone, qty }))
+    .sort((a, b) => b.qty - a.qty);
+
+  // Top SKUs
+  const skuTotals: Record<string, number> = {};
+  for (const lot of activeLots) {
+    skuTotals[lot.namaBarang] = (skuTotals[lot.namaBarang] || 0) + lot.qtySistem;
+  }
+  const topSkus = Object.entries(skuTotals)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([namaBarang, qty]) => ({ namaBarang, qty }));
+
+  // Empty racks
+  const emptyRacks = lots.filter(l => l.qtySistem === 0).length;
+
+  return {
+    summary: {
+      totalSKU,
+      totalSystemQty,
+      totalSOH,
+      variance: 0,
+      accuracy: 100,
+      expiredCount: expiredLots.length,
+      expiringCount: expiringSoon.length,
+      outOfStockCount: emptyRacks,
+      emptySlots: emptyRacks,
+    },
+    alerts: {
+      expired: expiredLots.slice(0, 10).map(l => ({
+        namaBarang: l.namaBarang,
+        nomorRak: l.nomorRak,
+        qty: l.qtySistem,
+        expiredDate: l.expiredLabel,
+      })),
+      expiring: expiringSoon.slice(0, 10).map(l => ({
+        namaBarang: l.namaBarang,
+        nomorRak: l.nomorRak,
+        qty: l.qtySistem,
+        expiredDate: l.expiredLabel,
+        daysLeft: l.daysToExpiry,
+      })),
+      outOfStock: lots.filter(l => l.qtySistem === 0 && l.namaBarang !== '-').slice(0, 10).map(l => l.namaBarang),
+    },
+    charts: {
+      topSkus,
+      zoneDistribution,
+    },
+    inventory: lots,
+  };
+}
+
+export async function getFefoLots(limit = 50) {
+  const lots = await getInventoryLots();
+  return lots
+    .filter(l => l.qtySistem > 0)
+    .sort((a, b) => a.daysToExpiry - b.daysToExpiry)
+    .slice(0, limit)
+    .map(l => ({
+      namaBarang: l.namaBarang,
+      nomorRak: l.nomorRak,
+      qtySistem: l.qtySistem,
+      daysToExpiry: l.daysToExpiry,
+      expiredLabel: l.expiredLabel,
+      statusFefo: l.statusFefo,
+      category: l.category,
+    }));
+}
+
+// ============================================================================
+// WAREHOUSE HEALTH CHECK
+// ============================================================================
+
+export async function getWarehouseHealth() {
+  const [ledger, catalog, warehouse, lots] = await Promise.all([
+    getLedger(),
+    getCatalog(),
+    getWarehouse(),
+    getInventoryLots(),
+  ]);
+
+  const activeRacks = warehouse.filter(w => w.status === 'Active');
+  const totalMasterRacks = activeRacks.length;
+  const activeSkus = catalog.filter(c => c.status === 'Active').length;
+
+  // Racks with stock from ledger
+  const racksWithStock = new Set(ledger.filter(l => l.qtyIn > 0).map(l => l.rackId));
+  const synced = activeRacks.filter(r => racksWithStock.has(r.rackId)).length;
+
+  // SKUs used in ledger vs catalog
+  const usedSkus = new Set(ledger.map(l => l.skuName.toLowerCase()));
+  const catalogSkus = new Set(catalog.filter(c => c.status === 'Active').map(c => c.namaBarang.toLowerCase()));
+
+  return {
+    totalMasterRacks,
+    inventoryRows: lots.length,
+    uniqueMasterSkus: activeSkus,
+    synced,
+    coverage: totalMasterRacks ? Math.round((synced / totalMasterRacks) * 100) : 100,
+    issues: 0,
+    emptyRacks: totalMasterRacks - racksWithStock.size,
+    racksWithStock: racksWithStock.size,
+    missingInInventory: [],
+    skuMismatch: [],
+    orphanRacks: [],
+  };
+}
+
+// ============================================================================
+// STOCK BY SKU (for stock tables)
+// ============================================================================
+
+export async function getStockBySku(search?: string) {
+  const lots = await getInventoryLots();
+  const catalog = await getCatalog();
+  const catalogByName = new Map(catalog.map(c => [c.namaBarang.toLowerCase(), c]));
+
+  const activeLots = lots.filter(l => l.qtySistem > 0);
+  if (search) {
+    const term = search.toLowerCase();
+    activeLots.filter(l => l.namaBarang.toLowerCase().includes(term) || l.nomorRak.toLowerCase().includes(term));
+  }
+
+  const skuMap: Record<string, any> = {};
+
+  for (const lot of activeLots) {
+    const key = lot.namaBarang.toLowerCase();
+    if (!skuMap[key]) {
+      const masterEntry = catalogByName.get(key);
+      skuMap[key] = {
+        namaBarang: lot.namaBarang,
+        category: masterEntry?.kategori || '',
+        barcode: masterEntry?.barcode || '',
+        unit: masterEntry?.satuan || 'Pcs',
+        totalQtySystem: 0,
+        totalSoh: 0,
+        rackCount: 0,
+        earliestExpiry: '9999-12-31',
+        earliestExpiryDate: '-',
+        statusFefo: 'OK',
+        racks: [],
+        moreRacks: 0,
+      };
+    }
+    const entry = skuMap[key];
+    entry.totalQtySystem += lot.qtySistem;
+    entry.totalSoh += lot.soh;
+    entry.rackCount++;
+    entry.racks.push(lot.nomorRak);
+
+    if (lot.tanggalExpired && lot.tanggalExpired < entry.earliestExpiry) {
+      entry.earliestExpiry = lot.tanggalExpired;
+      entry.earliestExpiryDate = formatDateShort(lot.tanggalExpired);
+    }
+
+    const statusOrder = { 'EXPIRED': 4, 'EXPIRED HARI INI': 3, 'HABIS': 2, 'OK': 1 };
+    if ((statusOrder[lot.statusFefo as keyof typeof statusOrder] || 0) > (statusOrder[entry.statusFefo as keyof typeof statusOrder] || 0)) {
+      entry.statusFefo = lot.statusFefo;
+    }
+  }
+
+  return Object.values(skuMap)
+    .map((s: any) => ({
+      ...s,
+      moreRacks: Math.max(0, s.racks.length - 3),
+      racks: s.racks.slice(0, 3),
+    }))
+    .sort((a, b) => a.namaBarang.localeCompare(b.namaBarang));
+}
+
+export async function getStockDetail(search?: string) {
+  const lots = await getInventoryLots();
+  return lots
+    .filter(l => !search || l.namaBarang.toLowerCase().includes(search.toLowerCase()) || l.nomorRak.toLowerCase().includes(search.toLowerCase()))
+    .map(l => ({
+      nomorRak: l.nomorRak,
+      namaBarang: l.namaBarang,
+      qtySistem: l.qtySistem,
+      soh: l.soh,
+      variance: l.variance,
+      akurasi: l.akurasi,
+      statusFefo: l.statusFefo,
+      urutanFefo: l.urutanFefo,
+      stockPicking: l.stockPicking,
+      tanggalInbound: l.tanggalInbound,
+      tanggalExpired: l.tanggalExpired,
+      expiredLabel: l.expiredLabel,
+      daysToExpiry: l.daysToExpiry,
+      barcode: l.barcode,
+      category: l.category,
+      unit: l.unit,
+    }))
+    .sort((a, b) => a.namaBarang.localeCompare(b.namaBarang) || a.nomorRak.localeCompare(b.nomorRak));
+}
+
+// ============================================================================
+// INBOUND SUBMISSION (Writes to Ledger)
+// ============================================================================
+
+export async function submitInbound(data: {
+  barcode: string;
+  namaBarang: string;
+  totalQty: number;
+  tanggalInbound: string;
+  tanggalKadaluarsa: string;
+  nomorSJ: string;
+  rack1?: string; qtyRack1?: number;
+  rack2?: string; qtyRack2?: number;
+  rack3?: string; qtyRack3?: number;
+  rack4?: string; qtyRack4?: number;
+  rack5?: string; qtyRack5?: number;
+  rack6?: string; qtyRack6?: number;
+  remarks: string;
+}) {
+  // Validate SKU exists in catalog
+  const sku = await getSKUByName(data.namaBarang);
+  if (!sku) {
+    throw new Error(`SKU "${data.namaBarang}" tidak ditemukan di Catalog.`);
+  }
+
+  // Validate racks exist in warehouse
+  const warehouse = await getWarehouse();
+  const validRacks = new Set(warehouse.map(w => w.rackId));
+  const racks = [
+    { rack: data.rack1, qty: data.qtyRack1 || 0 },
+    { rack: data.rack2, qty: data.qtyRack2 || 0 },
+    { rack: data.rack3, qty: data.qtyRack3 || 0 },
+    { rack: data.rack4, qty: data.qtyRack4 || 0 },
+    { rack: data.rack5, qty: data.qtyRack5 || 0 },
+    { rack: data.rack6, qty: data.qtyRack6 || 0 },
+  ];
+
+  for (const { rack, qty } of racks) {
+    if (rack && qty > 0 && !validRacks.has(rack)) {
+      throw new Error(`Rack "${rack}" tidak ditemukan di Physical_Warehouse.`);
+    }
+  }
+
+  // Write each rack allocation as separate ledger entry
+  let written = 0;
+  for (const { rack, qty } of racks) {
+    if (!rack || qty === 0) continue;
+
+    const recordId = `REC-${Date.now()}-${written}`;
+    await appendRow(SHEETS.LEDGER, [
+      recordId,
+      new Date().toISOString(),
+      data.namaBarang,
+      rack,
+      qty,
+      data.tanggalKadaluarsa,
+      data.nomorSJ || '',
+      data.remarks || '',
+    ]);
+    written++;
+  }
+
+  return { success: true, message: `Data inbound berhasil disimpan (${written} alokasi rack).` };
+}
+
+// ============================================================================
+// BACKWARD COMPATIBILITY & HELPER FUNCTIONS
+// ============================================================================
+
+// Legacy MasterMap interface for backward compatibility
 export interface MasterSkuEntry {
   skuName: string;
   category: string;
@@ -89,635 +666,72 @@ export interface MasterMap {
 }
 
 export async function getMasterMap(): Promise<MasterMap> {
-  const sh = await readSheet(SHEETS.MASTER);
-  // Master Data layout (header at the row whose first cell is "Nomor Rak"):
-  //   A: Nomor Rak | B: Jenis Lokasi | C: Entitas | D: NAMA BARANG | E: Satuan
-  // Older layout used different columns, so resolve the header row dynamically.
-  const headerIdx = sh.findIndex((r) => String(r[0] || '').trim() === 'Nomor Rak');
-  const data = sh.slice(headerIdx >= 0 ? headerIdx + 1 : 3);
+  // Build from new architecture for backward compatibility
+  const [catalog, warehouse, ledger] = await Promise.all([
+    getCatalog(),
+    getWarehouse(),
+    getLedger(),
+  ]);
 
   const bySku: Record<string, MasterSkuEntry> = {};
-  const racks: MasterRackEntry[] = [];
-
-  for (const row of data) {
-    const rack = String(row[0] || '').trim();
-    const locationType = String(row[1] || '').trim(); // B: Jenis Lokasi
-    const sku = String(row[3] || '').trim();          // D: NAMA BARANG
-    const unit = String(row[4] || '').trim();         // E: Satuan
-    const category = String(row[5] || '').trim();     // F: Kategori (optional)
-    const barcode = String(row[6] || '').trim();      // G: Barcode (optional)
-
-    if (!rack || !sku) continue; // need both rack and SKU
-
-    if (sku && !bySku[sku.toLowerCase()]) {
-      bySku[sku.toLowerCase()] = {
-        skuName: sku,
-        category,
-        unit,
-        barcode,
-        locationType,
+  for (const c of catalog) {
+    if (c.status === 'Active') {
+      bySku[c.namaBarang.toLowerCase()] = {
+        skuName: c.namaBarang,
+        category: c.kategori,
+        unit: c.satuan,
+        barcode: '',
+        locationType: '',
       };
     }
+  }
 
-    if (rack) {
-      racks.push({ rack, skuName: sku, qty: 0, locationType });
+  // Build rack entries from warehouse + ledger stock
+  const rackStock = new Map<string, number>();
+  for (const l of ledger) {
+    rackStock.set(l.rackId, (rackStock.get(l.rackId) || 0) + l.qtyIn);
+  }
+
+  const racks: MasterRackEntry[] = [];
+  for (const w of warehouse) {
+    if (w.status === 'Active') {
+      // Find which SKU is in this rack from ledger
+      const ledgerEntry = ledger.find(l => l.rackId === w.rackId && l.qtyIn > 0);
+      racks.push({
+        rack: w.rackId,
+        skuName: ledgerEntry?.skuName || '',
+        qty: rackStock.get(w.rackId) || 0,
+        locationType: w.jenisLokasi,
+      });
     }
   }
 
   return { bySku, racks };
 }
 
-export async function getSKUNames(): Promise<string[]> {
-  const master = await getMasterMap();
-  return Object.keys(master.bySku)
-    .map((k) => master.bySku[k].skuName)
-    .sort();
-}
-
 export async function getRackDetailsBySKU(skuName: string): Promise<{ rack: string; qtySistem: number }[]> {
-  const [master, inventory] = await Promise.all([
-    getMasterMap(),
-    getInventoryLots(),
-  ]);
-
-  const key = (skuName || '').toLowerCase();
-  const skuStock: Record<string, number> = {};
-
-  for (const lot of inventory) {
-    if (lot.namaBarang?.toLowerCase() === key) {
-      skuStock[lot.nomorRak] = (skuStock[lot.nomorRak] || 0) + lot.qtySistem;
+  const [ledger, warehouse] = await Promise.all([getLedger(), getWarehouse()]);
+  
+  const key = skuName.toLowerCase();
+  const rackStock = new Map<string, number>();
+  
+  for (const l of ledger) {
+    if (l.skuName.toLowerCase() === key) {
+      rackStock.set(l.rackId, (rackStock.get(l.rackId) || 0) + l.qtyIn);
     }
   }
 
   const seen = new Set<string>();
-  const uniqueRacks = master.racks
-    .map((r) => r.rack)
-    .filter((r) => r && !seen.has(r) && seen.add(r))
+  const uniqueRacks = warehouse
+    .filter(w => w.status === 'Active')
+    .map(w => w.rackId)
+    .filter(r => r && !seen.has(r) && seen.add(r))
     .sort();
 
-  return uniqueRacks.map((rack) => ({
+  return uniqueRacks.map(rack => ({
     rack,
-    qtySistem: skuStock[rack] || 0,
+    qtySistem: rackStock.get(rack) || 0,
   }));
-}
-
-// ============================================================================
-//  INVENTORY LOTS (FEFO logic)
-// ============================================================================
-
-export interface InventoryLot {
-  nomorRak: string;
-  namaBarang: string;
-  qtySistem: number;
-  tanggalInbound: string;
-  tanggalExpired: string;
-  expiredLabel: string;
-  daysToExpiry: number;
-  soh: number;
-  variance: number;
-  akurasi: number;
-  statusFefo: string;
-  urutanFefo: number;
-  stockPicking: number;
-  barcode: string;
-  category: string;
-  unit: string;
-}
-
-async function getInventoryLots(): Promise<InventoryLot[]> {
-  const [inventoryRows, masterMap] = await Promise.all([
-    readSheet(SHEETS.INVENTORY),
-    getMasterMap(),
-  ]);
-
-  // Inventory: header row 3, data from row 4
-  // Actual columns:
-  // 0: Nama Barang (SKU Name)
-  // 1: Nomor Rak (Rack Code)
-  // 2: Kuantitas Sistem
-  // 3: Tanggal Inbound
-  // 4: Tanggal Kadaluarsa
-  // 5: Stok Aktual (SOH)
-  // 6: Variance
-  // 7: Akurasi Stock
-  // 8: Status FEFO
-  // 9: Urutan FEFO
-  // 10: Kunci FEFO
-  // 11: Stock Picking
-  const data = inventoryRows.slice(3);
-  const lots: InventoryLot[] = [];
-
-  for (const row of data) {
-    // FIXED: Column A = Nama Barang (SKU), Column B = Nomor Rak (Rack)
-    const namaBarang = String(row[0] || '').trim();
-    const nomorRak = String(row[1] || '').trim();
-    const qtySistem = parseFloat(String(row[2] || '0')) || 0;
-    const tanggalInbound = String(row[3] || '').trim();
-    const tanggalExpired = String(row[4] || '').trim();
-    const soh = parseFloat(String(row[5] || '0')) || 0;
-    const variance = parseFloat(String(row[6] || '0')) || 0;
-    const akurasi = parseFloat(String(row[7] || '0')) || 0;
-    const statusFefo = String(row[8] || '').trim();
-    const urutanFefo = parseInt(String(row[9] || '0'), 10) || 0;
-    const stockPicking = parseFloat(String(row[10] || '0')) || 0;
-    // Inventory sheet doesn't have barcode/category/unit - get from Master Data
-    const masterEntry = masterMap.bySku[namaBarang.toLowerCase()];
-    const barcode = masterEntry?.barcode || '';
-    const category = masterEntry?.category || '';
-    const unit = masterEntry?.unit || '';
-
-    if (!nomorRak || !namaBarang) continue;
-
-    // Calculate days to expiry
-    let daysToExpiry = 0;
-    if (tanggalExpired) {
-      const expDate = new Date(tanggalExpired + 'T00:00:00');
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      daysToExpiry = Math.round((expDate.getTime() - today.getTime()) / 86400000);
-    }
-
-    const expiredLabel = formatDateShort(tanggalExpired);
-
-    lots.push({
-      nomorRak,
-      namaBarang,
-      qtySistem,
-      tanggalInbound,
-      tanggalExpired,
-      expiredLabel,
-      daysToExpiry,
-      soh,
-      variance,
-      akurasi,
-      statusFefo,
-      urutanFefo,
-      stockPicking,
-      barcode,
-      category,
-      unit,
-    });
-  }
-
-  return lots;
-}
-
-function formatDateShort(iso: string): string {
-  if (!iso) return '-';
-  const d = new Date(iso + 'T00:00:00');
-  if (isNaN(d.getTime())) return iso;
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des'];
-  return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
-}
-
-export async function getFullDashboard() {
-  const [lots, master, dashboardSummary] = await Promise.all([
-    getInventoryLots(),
-    getMasterMap(),
-    getDashboardSummary(),
-  ]);
-
-  // Unique SKU names present in inventory with stock > 0
-  const skusWithStock = new Set(lots.filter(l => l.qtySistem > 0).map(l => l.namaBarang).filter(Boolean));
-  const totalSKU = skusWithStock.size;
-
-  // Total system qty (all rows)
-  const totalSystemQty = lots.reduce((sum, l) => sum + l.qtySistem, 0);
-
-  // Total SOH (only rows that have been opname'd)
-  const totalSOH = lots.reduce((sum, l) => sum + l.soh, 0);
-
-  // Summary figures from Dasboard sheet (pre-computed by spreadsheet formulas)
-  const variance = dashboardSummary.totalVariance;
-  const accuracy = dashboardSummary.accuracy;
-  const outOfStockCount = dashboardSummary.outOfStockCount;
-
-  // Expired lots (per FEFO status) — qty still on hand
-  const expiredLots = lots.filter(
-    (l) => (l.statusFefo === 'EXPIRED' || l.statusFefo === 'EXPIRED HARI INI') && l.qtySistem > 0
-  );
-  const expiringSoon = lots.filter(
-    (l) => l.daysToExpiry >= 0 && l.daysToExpiry <= 30 && l.qtySistem > 0 && l.statusFefo !== 'HABIS'
-  );
-
-  // Empty slots: Master Data racks that have 0 system qty
-  const racksWithStock = new Set(lots.filter((l) => l.qtySistem > 0).map((l) => l.nomorRak));
-  const emptySlots = master.racks.filter((r) => r.qty === 0 && !racksWithStock.has(r.rack)).length;
-
-  // Top 10 SKU by system qty
-  const skuTotals: Record<string, number> = {};
-  for (const lot of lots) {
-    skuTotals[lot.namaBarang] = (skuTotals[lot.namaBarang] || 0) + lot.qtySistem;
-  }
-  const topSkus = Object.entries(skuTotals)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10)
-    .map(([namaBarang, qty]) => ({ namaBarang, qty }));
-
-  // Zone distribution — use Master Data's Jenis Lokasi (RACKING, FLOOR, CONTAINER, FREEZER)
-  const zoneMap: Record<string, number> = {};
-  for (const lot of lots) {
-    if (lot.nomorRak) {
-      const masterRack = master.racks.find(r => r.rack === lot.nomorRak);
-      const zone = masterRack?.locationType || lot.nomorRak.replace(/[^A-Za-z].*$/, '') || 'Unknown';
-      zoneMap[zone] = (zoneMap[zone] || 0) + lot.qtySistem;
-    }
-  }
-  const zoneLabels: Record<string, string> = {
-    'RACKING': 'Zona Racking',
-    'FLOOR': 'Zona Floor',
-    'CONTAINER': 'Zona Container',
-    'FREEZER': 'Zona Freezer',
-  };
-  const zoneDistribution = Object.entries(zoneMap)
-    .map(([zone, qty]) => ({ zone: zoneLabels[zone] || zone, qty }))
-    .sort((a, b) => b.qty - a.qty);
-
-  return {
-    summary: {
-      totalSKU,
-      totalSystemQty,
-      totalSOH,
-      variance,
-      accuracy,
-      expiredCount: expiredLots.length,
-      expiringCount: expiringSoon.length,
-      outOfStockCount,
-      emptySlots,
-    },
-    alerts: {
-      expired: expiredLots.slice(0, 10).map((l) => ({
-        namaBarang: l.namaBarang,
-        nomorRak: l.nomorRak,
-        qty: l.qtySistem,
-        expiredDate: l.expiredLabel,
-      })),
-      expiring: expiringSoon.slice(0, 10).map((l) => ({
-        namaBarang: l.namaBarang,
-        nomorRak: l.nomorRak,
-        qty: l.qtySistem,
-        expiredDate: l.expiredLabel,
-        daysLeft: l.daysToExpiry,
-      })),
-      outOfStock: lots.filter((l) => l.statusFefo === 'HABIS').slice(0, 10).map((l) => l.namaBarang),
-    },
-    charts: {
-      topSkus,
-      zoneDistribution,
-    },
-    inventory: lots,
-  };
-}
-
-/**
- * Lightweight lot feed for the FEFO timeline widget.
- * Returns only lots that still hold stock, sorted by nearest expiry.
- */
-export async function getFefoLots(limit = 50) {
-  const lots = await getInventoryLots();
-  return lots
-    .filter((l) => l.qtySistem > 0)
-    .sort((a, b) => a.daysToExpiry - b.daysToExpiry)
-    .slice(0, limit)
-    .map((l) => ({
-      namaBarang: l.namaBarang,
-      nomorRak: l.nomorRak,
-      qtySistem: l.qtySistem,
-      daysToExpiry: l.daysToExpiry,
-      expiredLabel: l.expiredLabel,
-      statusFefo: l.statusFefo,
-      category: l.category,
-    }));
-}
-
-/**
- * Warehouse health & Master Data integrity report.
- * Cross-checks Master Data (source of truth) against the Inventory sheet so
- * drift is visible instead of silent.
- */
-export async function getWarehouseHealth() {
-  const [lots, master] = await Promise.all([getInventoryLots(), getMasterMap()]);
-
-  const masterRacks = new Set(master.racks.map((r) => r.rack));
-  const invByRack = new Map(lots.map((l) => [l.nomorRak, l]));
-
-  // Racks defined in Master Data but missing / mismatched in Inventory
-  const missingInInventory: { rack: string; expectedSku: string }[] = [];
-  const skuMismatch: { rack: string; expectedSku: string; actualSku: string }[] = [];
-  for (const r of master.racks) {
-    const inv = invByRack.get(r.rack);
-    if (!inv) {
-      missingInInventory.push({ rack: r.rack, expectedSku: r.skuName });
-    } else if (inv.namaBarang.toLowerCase() !== r.skuName.toLowerCase()) {
-      skuMismatch.push({ rack: r.rack, expectedSku: r.skuName, actualSku: inv.namaBarang });
-    }
-  }
-
-  // Racks present in Inventory but not defined in Master Data
-  const orphanRacks = lots
-    .filter((l) => l.nomorRak && !masterRacks.has(l.nomorRak))
-    .map((l) => ({ rack: l.nomorRak, sku: l.namaBarang }));
-
-  const totalMasterRacks = master.racks.length;
-  const synced = master.racks.filter((r) => {
-    const inv = invByRack.get(r.rack);
-    return inv && inv.namaBarang.toLowerCase() === r.skuName.toLowerCase();
-  }).length;
-  const coverage = totalMasterRacks ? Math.round((synced / totalMasterRacks) * 100) : 100;
-
-  const racksWithStock = lots.filter((l) => l.qtySistem > 0).length;
-  const emptyRacks = totalMasterRacks - racksWithStock;
-
-  const issues = missingInInventory.length + skuMismatch.length + orphanRacks.length;
-
-  return {
-    totalMasterRacks,
-    inventoryRows: lots.length,
-    uniqueMasterSkus: Object.keys(master.bySku).length,
-    synced,
-    coverage,
-    issues,
-    emptyRacks,
-    racksWithStock,
-    missingInInventory: missingInInventory.slice(0, 25),
-    skuMismatch: skuMismatch.slice(0, 25),
-    orphanRacks: orphanRacks.slice(0, 25),
-  };
-}
-
-// ============================================================================
-//  DASHBOARD SHEET SUMMARY (pre-computed by spreadsheet formulas)
-// ============================================================================
-interface DashboardSummary {
-  totalSKU: number;
-  totalSystemQty: number;
-  totalSOH: number;
-  totalVariance: number;
-  accuracy: number;
-  expiredCount: number;
-  expiredTodayCount: number;
-  outOfStockCount: number;
-}
-
-async function getDashboardSummary(): Promise<DashboardSummary> {
-  const rows = await readSheet(SHEETS.DASHBOARD);
-
-  const num = (v: string | undefined): number => {
-    if (!v) return 0;
-    // Handle Indonesian formats: "100,00%" -> 100, "1.234,5" -> 1234.5
-    const cleaned = String(v).trim().replace('%', '').replace(/\./g, '').replace(',', '.');
-    const n = parseFloat(cleaned);
-    return isNaN(n) ? 0 : n;
-  };
-
-  const find = (label: string): string | undefined => {
-    const row = rows.find((r) => String(r[0] || '').toLowerCase().includes(label.toLowerCase()));
-    return row?.[1];
-  };
-
-  const accuracyRaw = find('Rata-rata Akurasi');
-  const expiredCount = num(find('Lot Expired'));
-  const expiredTodayCount = num(find('Lot Expired Hari Ini'));
-
-  return {
-    totalSKU: num(find('Total SKU')),
-    totalSystemQty: num(find('Total Kuantitas Sistem')),
-    totalSOH: num(find('Total Stok Aktual')),
-    totalVariance: num(find('Total Variance')),
-    accuracy: num(accuracyRaw),
-    expiredCount: expiredCount + expiredTodayCount,
-    expiredTodayCount,
-    outOfStockCount: num(find('Lot stok habis')),
-  };
-}
-
-export async function getStockBySku(search?: string) {
-  const lots = await getInventoryLots();
-  const master = await getMasterMap();
-
-  // Group by SKU
-  const skuMap: Record<string, {
-    namaBarang: string;
-    category: string;
-    barcode: string;
-    unit: string;
-    totalQtySystem: number;
-    totalSoh: number;
-    rackCount: number;
-    earliestExpiry: string;
-    earliestExpiryDate: string;
-    statusFefo: string;
-    racks: string[];
-    moreRacks: number;
-  }> = {};
-
-  for (const lot of lots) {
-    if (search && !lot.namaBarang.toLowerCase().includes(search.toLowerCase())) continue;
-
-    const key = lot.namaBarang.toLowerCase();
-    if (!skuMap[key]) {
-      const masterEntry = master.bySku[key];
-      skuMap[key] = {
-        namaBarang: lot.namaBarang,
-        category: masterEntry?.category || '',
-        barcode: masterEntry?.barcode || lot.barcode,
-        unit: masterEntry?.unit || lot.unit,
-        totalQtySystem: 0,
-        totalSoh: 0,
-        rackCount: 0,
-        earliestExpiry: '9999-12-31',
-        earliestExpiryDate: '-',
-        statusFefo: 'OK',
-        racks: [],
-        moreRacks: 0,
-      };
-    }
-
-    const entry = skuMap[key];
-    entry.totalQtySystem += lot.qtySistem;
-    entry.totalSoh += lot.soh;
-    entry.rackCount++;
-    entry.racks.push(lot.nomorRak);
-
-    if (lot.tanggalExpired && lot.tanggalExpired < entry.earliestExpiry) {
-      entry.earliestExpiry = lot.tanggalExpired;
-      entry.earliestExpiryDate = formatDateShort(lot.tanggalExpired);
-    }
-
-    // Worst status wins
-    const statusOrder = { 'EXPIRED': 4, 'EXPIRED HARI INI': 3, 'HABIS': 2, 'OK': 1 };
-    if ((statusOrder[lot.statusFefo as keyof typeof statusOrder] || 0) > (statusOrder[entry.statusFefo as keyof typeof statusOrder] || 0)) {
-      entry.statusFefo = lot.statusFefo;
-    }
-  }
-
-  return Object.values(skuMap)
-    .map((s) => ({
-      ...s,
-      moreRacks: Math.max(0, s.racks.length - 3),
-      racks: s.racks.slice(0, 3),
-    }))
-    .sort((a, b) => a.namaBarang.localeCompare(b.namaBarang));
-}
-
-export async function getStockDetail(search?: string) {
-  const lots = await getInventoryLots();
-  return lots
-    .filter((l) => !search || l.namaBarang.toLowerCase().includes(search.toLowerCase()) || l.nomorRak.toLowerCase().includes(search.toLowerCase()))
-    .map((l) => ({
-      nomorRak: l.nomorRak,
-      namaBarang: l.namaBarang,
-      qtySistem: l.qtySistem,
-      soh: l.soh,
-      variance: l.variance,
-      akurasi: l.akurasi,
-      statusFefo: l.statusFefo,
-      urutanFefo: l.urutanFefo,
-      stockPicking: l.stockPicking,
-      tanggalInbound: l.tanggalInbound,
-      tanggalExpired: l.tanggalExpired,
-      expiredLabel: l.expiredLabel,
-      daysToExpiry: l.daysToExpiry,
-      barcode: l.barcode,
-      category: l.category,
-      unit: l.unit,
-    }))
-    .sort((a, b) => a.namaBarang.localeCompare(b.namaBarang) || a.nomorRak.localeCompare(b.nomorRak));
-}
-
-export async function submitInbound(data: {
-  barcode: string;
-  namaBarang: string;
-  totalQty: number;
-  tanggalInbound: string;
-  tanggalKadaluarsa: string;
-  nomorSJ: string;
-  rack1?: string; qtyRack1?: number;
-  rack2?: string; qtyRack2?: number;
-  rack3?: string; qtyRack3?: number;
-  rack4?: string; qtyRack4?: number;
-  rack5?: string; qtyRack5?: number;
-  rack6?: string; qtyRack6?: number;
-  remarks: string;
-}) {
-  const row = [
-    data.barcode || '',
-    data.namaBarang,
-    data.totalQty,
-    data.tanggalInbound,
-    data.tanggalKadaluarsa,
-    data.nomorSJ || '',
-    data.rack1 || '', data.qtyRack1 || 0,
-    data.rack2 || '', data.qtyRack2 || 0,
-    data.rack3 || '', data.qtyRack3 || 0,
-    data.rack4 || '', data.qtyRack4 || 0,
-    data.rack5 || '', data.qtyRack5 || 0,
-    data.rack6 || '', data.qtyRack6 || 0,
-    data.remarks || '',
-  ];
-
-  await appendRow(SHEETS.INBOUND, row);
-  
-  // Also sync to Inventory sheet (keep Master Data aligned)
-  await syncInboundToInventory(data);
-  
-  return { success: true, message: 'Data inbound berhasil disimpan dan disinkronkan ke Inventory.' };
-}
-
-async function syncInboundToInventory(data: {
-  namaBarang: string;
-  totalQty: number;
-  tanggalInbound: string;
-  tanggalKadaluarsa: string;
-  rack1?: string; qtyRack1?: number;
-  rack2?: string; qtyRack2?: number;
-  rack3?: string; qtyRack3?: number;
-  rack4?: string; qtyRack4?: number;
-  rack5?: string; qtyRack5?: number;
-  rack6?: string; qtyRack6?: number;
-}) {
-  const client = await getSheetsClient();
-  const spreadsheetId = process.env.GOOGLE_SHEET_ID!;
-
-  // Read current Inventory to find existing rows
-  const invRows = await readSheet(SHEETS.INVENTORY);
-  const headerIdx = invRows.findIndex(r => r[0] === 'Nama Barang');
-  const invData = invRows.slice(headerIdx + 1);
-  
-  // Build map: rack -> row index (1-based for sheet)
-  const rackToRowIdx: Record<string, number> = {};
-  for (let i = 0; i < invData.length; i++) {
-    const rack = String(invData[i][1] || '').trim();
-    if (rack) rackToRowIdx[rack] = headerIdx + 2 + i; // +2 for header row + 1-based
-  }
-
-  const racks = [
-    { rack: data.rack1, qty: data.qtyRack1 || 0 },
-    { rack: data.rack2, qty: data.qtyRack2 || 0 },
-    { rack: data.rack3, qty: data.qtyRack3 || 0 },
-    { rack: data.rack4, qty: data.qtyRack4 || 0 },
-    { rack: data.rack5, qty: data.qtyRack5 || 0 },
-    { rack: data.rack6, qty: data.qtyRack6 || 0 },
-  ];
-
-  const updates = [];
-  
-  for (const { rack, qty } of racks) {
-    if (!rack || qty === 0) continue;
-    
-    const rowIdx = rackToRowIdx[rack];
-    
-    if (rowIdx) {
-      // Update existing row: add to Kuantitas Sistem (col C, index 2)
-      const currentRow = invData[rowIdx - headerIdx - 2];
-      const currentQty = parseInt(String(currentRow[2] || '0'), 10) || 0;
-      const newQty = currentQty + qty;
-      
-      updates.push({
-        range: `${SHEETS.INVENTORY}!C${rowIdx}`, // Kuantitas Sistem
-        values: [[newQty]],
-      });
-      
-      // Update Tanggal Inbound (col D, index 3) if newer
-      updates.push({
-        range: `${SHEETS.INVENTORY}!D${rowIdx}`,
-        values: [[data.tanggalInbound]],
-      });
-      
-      // Update Tanggal Kadaluarsa (col E, index 4)
-      updates.push({
-        range: `${SHEETS.INVENTORY}!E${rowIdx}`,
-        values: [[data.tanggalKadaluarsa]],
-      });
-      
-      // Update Nama Barang (col A, index 0) to match Master Data
-      updates.push({
-        range: `${SHEETS.INVENTORY}!A${rowIdx}`,
-        values: [[data.namaBarang]],
-      });
-    } else {
-      // New rack - append row (shouldn't happen if Master Data is complete, but handle anyway)
-      const newRow = [
-        data.namaBarang,
-        rack,
-        qty,
-        data.tanggalInbound,
-        data.tanggalKadaluarsa,
-        '0', '0', '100,00%', '', '0', '0'
-      ];
-      await appendRow(SHEETS.INVENTORY, newRow);
-    }
-  }
-
-  if (updates.length > 0) {
-    await client.spreadsheets.values.batchUpdate({
-      spreadsheetId,
-      requestBody: {
-        valueInputOption: 'USER_ENTERED',
-        data: updates,
-      },
-    });
-  }
 }
 
 function _str(v: any): string {
