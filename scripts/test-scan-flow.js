@@ -50,20 +50,21 @@ async function main() {
   }
 
   console.log('\n3. Testing inbound via scan flow (A0101A + 500 pcs)...');
+  const inboundBody = JSON.stringify({
+    barcode: 'SCAN-A0101A',
+    namaBarang: 'Apron',
+    totalQty: 500,
+    tanggalInbound: new Date().toISOString().slice(0, 10),
+    tanggalKadaluarsa: '2027-12-31',
+    nomorSJ: 'SJ-SCAN-TEST',
+    rack1: 'A0101A',
+    qtyRack1: 500,
+    remarks: 'Test scan inbound',
+  });
   const inbound = await request(
     { hostname: HOST, path: '/api/inbound', method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': 0, Cookie: cookie } },
-    JSON.stringify({
-      barcode: 'SCAN-A0101A',
-      namaBarang: 'Apron',
-      totalQty: 500,
-      tanggalInbound: new Date().toISOString().slice(0, 10),
-      tanggalKadaluarsa: '2027-12-31',
-      nomorSJ: 'SJ-SCAN-TEST',
-      rack1: 'A0101A',
-      qtyRack1: 500,
-      remarks: 'Test scan inbound',
-    })
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(inboundBody), Cookie: cookie } },
+    inboundBody
   );
   console.log('   Status:', inbound.status, inbound.body);
 

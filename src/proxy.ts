@@ -10,6 +10,8 @@ export async function proxy(request: NextRequest) {
                    pathname.startsWith('/api/auth') || 
                    pathname.startsWith('/api/health') ||
                    pathname.startsWith('/api/rack/scan') ||
+                   pathname.startsWith('/api/inbound/scan') ||
+                   pathname.startsWith('/inbound/scan') ||
                    pathname.startsWith('/_next') || 
                    pathname === '/favicon.ico';
 
@@ -36,8 +38,8 @@ export async function proxy(request: NextRequest) {
 
   const role = token.role as string;
 
-  // Protect Inbound page (Only Super Admin and Manager)
-  if (pathname.startsWith('/inbound')) {
+  // Protect Inbound page (Only Super Admin and Manager). Scan pages are public (handled above).
+  if (pathname.startsWith('/inbound') && !pathname.startsWith('/inbound/scan')) {
     if (role !== 'super-admin' && role !== 'manager') {
       return NextResponse.redirect(new URL('/', request.url));
     }

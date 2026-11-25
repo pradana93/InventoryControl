@@ -55,7 +55,7 @@ export default function RackScanPage() {
 
     setSubmitting(true);
     try {
-      const res = await fetch('/api/inbound', {
+      const res = await fetch('/api/inbound/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
