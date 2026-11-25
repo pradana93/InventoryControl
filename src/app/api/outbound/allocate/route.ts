@@ -13,17 +13,31 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const lines = body.lines || [];
+    const entitas = body.entitas as 'BBB' | 'BBT' | undefined;
 
     if (!lines.length) {
       return NextResponse.json({ error: 'Tidak ada baris untuk dialokasikan' }, { status: 400 });
     }
 
+    if (!entitas || (entitas !== 'BBB' && entitas !== 'BBT')) {
+      return NextResponse.json({ error: 'Entitas wajib dipilih (BBB atau BBT)' }, { status: 400 });
+    }
+
     // Fetch all data
-    const [ledger, warehouse, catalog] = await Promise.all([
+    const [allLedger, allWarehouse, catalog] = await Promise.all([
       getLedger(),
       getWarehouse(),
       getCatalog(),
     ]);
+
+    // Filter to the entity's racks
+    const entityWarehouse = allWarehouse.filter(w => w.entitas === entitas);
+    const entityRackIds = new Set(entityWarehouse.map(w => w.rackId));
+
+    const ledger = allLedger.filter(e => 
+      (e.entitas === entitas) || entityRackIds.has(e.rackId)
+    );
+    const warehouse = entityWarehouse;
 
     // Build active stock lot-by-lot, netting inbound (positive) against
     // outbound (negative) so repeat runs never over-allocate.

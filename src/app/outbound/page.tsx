@@ -26,8 +26,12 @@ import {
   FileSpreadsheet,
   Printer,
   X,
+  Globe,
+  BadgeCheck,
+  AlertCircle,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
+import { useEntity, ENTITY_COLORS, PT_PATTERNS } from '@/lib/constants';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `/pdf.worker.min.mjs`;
 
@@ -68,6 +72,15 @@ interface Toast {
 }
 
 export default function OutboundPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-background px-4 py-6"><div className="container mx-auto"><p className="text-muted-foreground">Memuat form outbound…</p></div></div>}>
+      <OutboundPageContent />
+    </Suspense>
+  );
+}
+
+function OutboundPageContent() {
+  const { entity, setEntity, badge, options } = useEntity();
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [parsedLines, setParsedLines] = useState<ParsedLine[]>([]);
   const [parsing, setParsing] = useState(false);
@@ -76,6 +89,8 @@ export default function OutboundPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [entityModalOpen, setEntityModalOpen] = useState(false);
+  const [detectedEntity, setDetectedEntity] = useState<'BBB' | 'BBT' | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // RO confirmation dialog state
@@ -101,6 +116,35 @@ export default function OutboundPage() {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
+  // Entity detection from PDF text
+  function detectEntityFromPdf(text: string): 'BBB' | 'BBT' | null {
+    const upperText = text.toUpperCase();
+    
+    // Check BBB patterns
+    for (const pattern of PT_PATTERNS.BBB) {
+      if (upperText.includes(pattern)) {
+        return 'BBB';
+      }
+    }
+    
+    // Check BBT patterns
+    for (const pattern of PT_PATTERNS.BBT) {
+      if (upperText.includes(pattern)) {
+        return 'BBT';
+      }
+    }
+    
+    return null;
+  }
+
+  // Handle entity selection from modal
+  const handleEntitySelect = (ent: 'BBB' | 'BBT') => {
+    setEntity(ent);
+    setEntityModalOpen(false);
+    setDetectedEntity(ent);
+    addToast('success', `Entitas diatur ke: ${ent}`);
+  };
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -118,6 +162,7 @@ export default function OutboundPage() {
       // Escape to close dialog
       if (e.key === 'Escape') {
         setRoDialogOpen(false);
+        setEntityModalOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -172,6 +217,17 @@ export default function OutboundPage() {
         fullText += strings + '\n';
       }
 
+      // Detect entity from PDF text
+      const detected = detectEntityFromPdf(fullText);
+      if (detected) {
+        setDetectedEntity(detected);
+        if (entity === 'ALL' || entity !== detected) {
+          setEntityModalOpen(true);
+        }
+      } else if (entity === 'ALL') {
+        setEntityModalOpen(true);
+      }
+
       const lines = fullText.split('\n').filter(l => l.trim().length > 3);
       const cells = lines.join(' | ').split('|').map(c => c.trim()).filter(c => c.length > 0);
 
@@ -180,7 +236,8 @@ export default function OutboundPage() {
       const roMatch = headerText.match(/(?:No\.?\s*(?:SO|RO|Order)|SO|RO)\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-\/]{4,})/i);
       if (roMatch && !roNumber) setRoNumber(roMatch[1].trim());
 
-      const catalogRes = await fetch('/api/sku?action=names');
+      const ent = entity === 'ALL' ? detected || 'BBB' : entity;
+      const catalogRes = await fetch(`/api/sku?action=names${ent ? `&ent=${ent}` : ''}`);
       const catalog = catalogRes.ok ? await catalogRes.json() : [];
 
       const startIdx = cells.findIndex(c => c.toLowerCase().includes('kuantitas') || c.toLowerCase().includes('pck'));
@@ -253,10 +310,18 @@ export default function OutboundPage() {
         return;
       }
       
+      const ent = entity === 'ALL' ? detectedEntity : entity;
+      if (!ent) {
+        setError('Entitas belum dipilih. Pilih entitas terlebih dahulu.');
+        addToast('error', 'Entitas belum dipilih.');
+        setEntityModalOpen(true);
+        return;
+      }
+      
       const res = await fetch('/api/outbound/allocate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lines: linesToAllocate }),
+        body: JSON.stringify({ lines: linesToAllocate, entitas: ent }),
       });
       
       if (!res.ok) throw new Error('Gagal alokasi');
@@ -289,6 +354,12 @@ export default function OutboundPage() {
       return;
     }
 
+    const ent = entity === 'ALL' ? detectedEntity : entity;
+    if (!ent) {
+      setRoError('Entitas belum dipilih');
+      return;
+    }
+
     setAllocating(true);
     
     try {
@@ -301,6 +372,7 @@ export default function OutboundPage() {
           customer: roCustomer.trim(),
           branch: roBranch.trim(),
           roDate,
+          entitas: ent,
         }),
       });
       
@@ -315,6 +387,7 @@ export default function OutboundPage() {
         roDate: data.roDate,
         ledgerEntries: data.ledgerEntries,
         allocations,
+        entitas: ent,
       });
 
       setRoDialogOpen(false);
@@ -384,12 +457,29 @@ export default function OutboundPage() {
   }
 
   const totalQty = allocations.reduce((s, a) => s + a.qtyAllocated, 0);
+  const entityLabel = entity === 'ALL' ? 'Semua Entitas' : entity;
+  const activeEntity = entity === 'ALL' ? detectedEntity : entity;
 
   return (
     <div className="p-6 space-y-6 max-w-6xl mx-auto">
-      <h1 className="text-2xl font-bold flex items-center gap-2">
-        <FileText className="h-6 w-6" /> Outbound & Picking List
-      </h1>
+      <div className="flex items-center gap-3 flex-wrap">
+        <h1 className="text-2xl font-bold flex items-center gap-2">
+          <FileText className="h-6 w-6" /> Outbound & Picking List
+        </h1>
+        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${ENTITY_COLORS[entity].badge}`}>
+          <Globe className="h-3 w-3" /> {entityLabel}
+        </span>
+        {detectedEntity && (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold border bg-emerald-100 text-emerald-800 border-emerald-300">
+            <BadgeCheck className="h-3 w-3" /> Terdeteksi: {detectedEntity}
+          </span>
+        )}
+        {entity === 'ALL' && !activeEntity && (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold border bg-amber-100 text-amber-800 border-amber-300">
+            <AlertCircle className="h-3 w-3" /> Pilih entitas
+          </span>
+        )}
+      </div>
 
       {/* Toasts */}
       <div className="fixed top-6 right-6 z-50 flex flex-col gap-2 pointer-events-none">
@@ -750,6 +840,35 @@ export default function OutboundPage() {
               {allocating ? 'Memproses...' : 'Konfirmasi & Buat Picking List'}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Entity Selection Dialog */}
+      <Dialog open={entityModalOpen} onOpenChange={setEntityModalOpen}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Globe className="h-5 w-5" /> Pilih Entitas
+            </DialogTitle>
+            <DialogDescription>
+              {detectedEntity
+                ? `PDF terdeteksi milik entitas ${detectedEntity}. Konfirmasi atau pilih entitas lain.`
+                : 'PDF tidak mengandung nama PT yang dikenali. Pilih entitas untuk outbound ini.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-2">
+            {options.filter(o => o.value !== 'ALL').map((opt) => (
+              <Button
+                key={opt.value}
+                variant={detectedEntity === opt.value ? 'default' : 'outline'}
+                className="h-auto py-4 flex flex-col gap-1"
+                onClick={() => handleEntitySelect(opt.value as 'BBB' | 'BBT')}
+              >
+                <span className="text-base font-semibold">{opt.short}</span>
+                <span className="text-xs opacity-80 font-normal text-center">{opt.label}</span>
+              </Button>
+            ))}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

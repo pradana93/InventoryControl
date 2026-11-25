@@ -12,3 +12,13 @@ Task 2: complete (commit 6ed253f, verify: npm run build → PASS)
   - src/app/page.tsx: entity badge + Suspense
   - DashboardView, DashboardGrid, DashboardContent, EnhancedStockTables, StockTables, Charts, AlertBanner → entity-aware
   - AlertBanner.outOfStock now {namaBarang, entitas}[]
+
+Task 3: complete (commit d650dce, verify: npm run build → PASS)
+  - /api/sku/route.ts: action=names|stock|rack-details with ent filter
+  - /api/rack/route.ts: action=detail with ent filter
+  - /api/inbound/route.ts: validates entitas, checks racks belong to entity
+  - /api/inbound/scan/route.ts: determines entity from rackId, passes to submitInbound
+  - google-sheets.ts: submitInbound requires entitas, validates SKU+rack belong to entity, writes entitas to Ledger
+  - LedgerEntry now includes entitas
+  - InboundForm: uses useEntity(), filters SKUs/racks by entity, shows entity badge, sends entitas in payload
+  - /inbound/page.tsx wrapped in Suspense

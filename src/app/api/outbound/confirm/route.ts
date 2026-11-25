@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getSheetsClient, readSheet, appendRow, SHEETS } from '@/lib/google-sheets';
+import { getSheetsClient, readSheet, appendRow, SHEETS, getWarehouse } from '@/lib/google-sheets';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,12 +16,28 @@ export async function POST(request: Request) {
     const customer = body.customer?.trim() || '';
     const branch = body.branch?.trim() || '';
     const roDate = body.roDate?.trim() || new Date().toISOString().slice(0, 10);
+    const entitas = body.entitas as 'BBB' | 'BBT' | undefined;
 
     if (!allocations.length) {
       return NextResponse.json({ error: 'Tidak ada alokasi untuk dikonfirmasi' }, { status: 400 });
     }
     if (!roNumber) {
       return NextResponse.json({ error: 'RO Number wajib diisi' }, { status: 400 });
+    }
+    if (!entitas || (entitas !== 'BBB' && entitas !== 'BBT')) {
+      return NextResponse.json({ error: 'Entitas wajib dipilih (BBB atau BBT)' }, { status: 400 });
+    }
+
+    // Validate all allocation racks belong to the entity
+    const warehouse = await getWarehouse();
+    const entityRackIds = new Set(warehouse.filter(w => w.entitas === entitas).map(w => w.rackId));
+    for (const alloc of allocations) {
+      if (!entityRackIds.has(alloc.rackId)) {
+        return NextResponse.json(
+          { error: `Rack ${alloc.rackId} bukan milik entitas ${entitas}` },
+          { status: 400 }
+        );
+      }
     }
 
     const client = await getSheetsClient();
@@ -48,6 +64,7 @@ export async function POST(request: Request) {
         alloc.expiredDate,
         pickingListNo,
         `Outbound via ${pickingListNo} (RO: ${roNumber})`,
+        entitas,
       ]);
       ledgerEntries++;
     }
@@ -55,7 +72,7 @@ export async function POST(request: Request) {
     // 2. Write to Picking List sheet (enhanced with RO details columns)
     const plHeaders = [
       'No', 'Picking_List_No', 'RO_Number', 'Customer', 'Branch', 'RO_Date',
-      'Rack_ID', 'SKU_Name', 'Qty_Pick', 'Expired_Date', 'Zone', 'Sequence', 'Status', 'Timestamp'
+      'Rack_ID', 'SKU_Name', 'Qty_Pick', 'Expired_Date', 'Zone', 'Sequence', 'Entitas', 'Status', 'Timestamp'
     ];
 
     // Check if Picking List sheet exists, create if not
@@ -98,6 +115,7 @@ export async function POST(request: Request) {
       alloc.expiredDate,
       alloc.zone,
       String(alloc.sequence),
+      entitas,
       'PENDING',
       new Date().toISOString(),
     ]);
