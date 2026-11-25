@@ -17,6 +17,7 @@ export const authOptions: any = {
         password: { label: 'Password', type: 'password' },
       },
       async authorize(credentials: any) {
+        console.log('[auth-debug] authorize called with:', { email: credentials?.email, hasPassword: !!credentials?.password });
         const email = credentials?.email?.toLowerCase().trim();
         const password = credentials?.password;
 
@@ -76,6 +77,26 @@ export const authOptions: any = {
   },
   secret: process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET,
   trustHost: true,
+  cookies: {
+    sessionToken: {
+      name: process.env.NODE_ENV === 'production' ? '__Secure-authjs.session-token' : 'authjs.session-token',
+      options: {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: process.env.NODE_ENV === 'production',
+      },
+    },
+    csrfToken: {
+      name: '__Host-authjs.csrf-token',
+      options: {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: true,
+      },
+    },
+  },
 };
 
 export const { handlers, auth, signIn, signOut } = NextAuth(authOptions);
