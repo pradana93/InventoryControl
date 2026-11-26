@@ -49,6 +49,13 @@ function _num(v: unknown): number {
   return isNaN(n) ? 0 : n;
 }
 
+/** Parse a value to a number, falling back to `fallback` when null/undefined/NaN. */
+function _numOr(v: unknown, fallback: number): number {
+  if (v === null || v === undefined || v === '') return fallback;
+  const n = Number(v);
+  return isNaN(n) ? fallback : n;
+}
+
 function _entity(v: unknown): 'BBB' | 'BBT' {
   const s = String(v || '').trim().toUpperCase();
   return s === 'BBT' ? 'BBT' : 'BBB';
@@ -108,6 +115,8 @@ export interface CatalogEntry {
   entitas: string;
   barcode: string;
   unitCost: number;
+  leadTimeDays: number;
+  safetyStockDays: number;
 }
 
 export async function getCatalog(): Promise<CatalogEntry[]> {
@@ -121,6 +130,8 @@ export async function getCatalog(): Promise<CatalogEntry[]> {
     entitas: _entity(r.entitas),
     barcode: _str(r.barcode),
     unitCost: _num(r.unit_cost),
+    leadTimeDays: _numOr(r.lead_time_days, 3),
+    safetyStockDays: _numOr(r.safety_stock_days, 3),
   }));
 }
 
@@ -149,6 +160,8 @@ export async function getSKUById(skuId: string): Promise<CatalogEntry | null> {
     entitas: _entity(data.entitas),
     barcode: _str(data.barcode),
     unitCost: _num(data.unit_cost),
+    leadTimeDays: _numOr(data.lead_time_days, 3),
+    safetyStockDays: _numOr(data.safety_stock_days, 3),
   };
 }
 
@@ -169,6 +182,8 @@ export async function getSKUByName(namaBarang: string): Promise<CatalogEntry | n
     entitas: _entity(data.entitas),
     barcode: _str(data.barcode),
     unitCost: _num(data.unit_cost),
+    leadTimeDays: _numOr(data.lead_time_days, 3),
+    safetyStockDays: _numOr(data.safety_stock_days, 3),
   };
 }
 
