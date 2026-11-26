@@ -267,6 +267,28 @@ Auto-deploys to the aliased production URL `inventory-control-five.vercel.app`.
       entity selector dropdown (BBB/BBT/ALL) with colored badges, user profile dropdown
       with role badge and sign-out, tooltips on collapsed icons, smooth transitions.
       All 6 routes (Dashboard, Inbound, Outbound, Opname, Labels, Users) verified working.
+- [x] **Phase 1 — Opname Discipline & Picking List Generator** (see
+      `docs/superpowers/specs/2026-11-26-opname-fefo-enforcement-design.md`):
+      - [x] **Nav rename**: "Outbound" → **"Picking List Generator"** (sidebar + page titles).
+      - [x] **Opname DB schema** (`supabase/migrations/20261126100000_opname_enhancements.sql`):
+            `catalog.unit_cost`; `stock_opname.selisih_rp`, `tolerance_status`, `petugas`, `catatan`.
+      - [x] **Unit-cost seeding** (`seedUnitCost()` in `src/lib/db.ts`) + `/api/stock-opname?action=seed-cost`.
+      - [x] **Goods-per-Rack Opname**: `/api/stock-opname?action=list` now reads actual
+            inventory lots (via `getInventoryLots`) so every rack/SKU on hand appears for counting,
+            merged with unit cost, Rupiah variance, and tolerance status — not just prior counts.
+      - [x] **Opname UI** (`src/app/opname/page.tsx`): summary cards (SKU counted, overall accuracy,
+            net Rupiah variance, items needing investigation), **Prioritas Hari Ini** vs **Semua SKU**
+            tabs, dynamic priority queue, status badges (`Akurat`/`Toleransi`/`Selisih`),
+            per-row `Harga Satuan`, `Selisih Rp`, `Akurasi`; logs `petugas` from session.
+      - [x] **FEFO allocation engine** (`/api/outbound/allocate`): strict expiry-ascending sort,
+            `daysToExpiry` + `fefoStatus` (OK/SEGERA/KRITIS/HARI INI/EXPIRED), zone-ordered pick
+            sequence (RACKING→FLOOR→CONTAINER→FREEZER) with numeric rack collation,
+            `shortages` + `fefoOrder` audit payload.
+      - [x] **FEFO enforcement** (`/api/outbound/confirm`): blocks confirmation when an
+            earlier-expiring lot of the same SKU still has stock, or when requested qty exceeds
+            the lot's available stock — returns explicit Indonesian violation messages.
+      - [x] **Picking List UI**: allocation + confirmed tables show Seq, Rak, Zona, SKU, Qty,
+            Expired, Sisa Hari, and colour-coded Status FEFO.
 
 ### 🔧 Known Issues / Follow-ups
 - [ ] Verify end-to-end outbound test after the `Picking_List` header reset
@@ -306,3 +328,14 @@ Auto-deploys to the aliased production URL `inventory-control-five.vercel.app`.
 - Deploy: `npx vercel --prod --yes` after a passing `npm run build`.
 - Working tree note: `AGENTS.md` contains a Next.js-managed block that is re-added
   by `next dev`; keep it in commits to keep the tree clean.
+
+### Production Deployment (current)
+
+- **Host:** Vercel project `inventory-control` on team `ai-468b` (user `whleadervt-2175`).
+- **Live URL:** <https://inventory-control-six-mu.vercel.app>
+- **Database:** Supabase (`https://llmpggljjodyrevnzwxg.supabase.co`).
+- The previous `vt23` Vercel account is deprecated; migrate/delete at will — the source
+  of truth is GitHub `main`, not Vercel.
+- Production env vars: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+  `SUPABASE_SERVICE_ROLE_KEY`, `NEXTAUTH_SECRET`, `AUTH_SECRET`, `NEXTAUTH_URL`,
+  `SUPER_ADMIN_EMAIL`, `DEFAULT_SUPER_ADMIN_PASSWORD`.
