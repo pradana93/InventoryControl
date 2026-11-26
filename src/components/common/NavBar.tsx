@@ -19,7 +19,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ShieldAlert,
-  Calculator
+  Calculator,
+  AlertTriangle
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState, useRef, useEffect } from 'react';
@@ -80,6 +81,7 @@ export function NavBar() {
     { href: '/labels', icon: QrCode, label: 'Label Rak', roles: ['super-admin', 'manager'] },
     { href: '/calculator', icon: Calculator, label: 'Kalkulator Persediaan', roles: ['super-admin', 'manager'] },
     { href: '/calculator-settings', icon: ShieldAlert, label: 'Pengaturan Kalkulator', roles: ['super-admin', 'manager'] },
+    { href: '/replenishment', icon: AlertTriangle, label: 'Pusat Tindakan', roles: ['super-admin', 'manager', 'operator'] },
     { href: '/users', icon: Users, label: 'Pengguna', roles: ['super-admin'] },
   ].filter((item) => !role || item.roles.includes(role));
 
