@@ -1,4 +1,5 @@
 import { supabaseAdmin } from './supabase';
+import { calculateInventoryMetrics, CalculatorResult } from './inventory-calculator';
 
 // ============================================================================
 // SUPABASE DATA LAYER
@@ -19,6 +20,20 @@ import { supabaseAdmin } from './supabase';
 // ============================================================================
 
 export type EntityFilter = 'BBB' | 'BBT' | 'ALL';
+
+export interface CalculatorSummary {
+  kritisCount: number;
+  amanCount: number;
+  overstockCount: number;
+  totalInventoryValue: number;
+  totalSaranOrderValue: number;
+  topKritis: Array<{
+    skuName: string;
+    doi: string;
+    coverageDays: string;
+    entitas: string;
+  }>;
+}
 
 // Legacy alias kept so imports such as `import { SHEETS } from '@/lib/google-sheets'`
 // do not break. No longer used for actual reads/writes.
@@ -864,6 +879,7 @@ export async function getFullDashboard(entity?: EntityFilter) {
       zoneDistribution: zoneDistribution.map((z) => ({ ...z, entitas: entity || 'ALL' })),
     },
     inventory: filteredLots,
+    calculatorSummary: await getCalculatorSummary(entity),
   };
 }
 
@@ -916,6 +932,51 @@ export async function getWarehouseHealth() {
     missingInInventory: [],
     skuMismatch: [],
     orphanRacks: [],
+  };
+}
+
+// ============================================================================
+// CALCULATOR SUMMARY (Dashboard KPIs & KRITIS Alerts)
+// ============================================================================
+
+/**
+ * Fetches inventory data and computes calculator-based summary for dashboard.
+ * Includes KRITIS/AMAN/OVERSTOCK counts, inventory value, reorder value, and top KRITIS SKUs.
+ */
+export async function getCalculatorSummary(entity?: EntityFilter): Promise<CalculatorSummary> {
+  const [lots, catalog, ledger] = await Promise.all([
+    getInventoryLots(),
+    getCatalog(),
+    getLedger(),
+  ]);
+
+  const entityFilter = entity || 'ALL';
+  const results = calculateInventoryMetrics({ lots, catalog, ledger, entity: entityFilter });
+
+  const kritisItems = results.filter((r) => r.status === 'KRITIS');
+  const amanItems = results.filter((r) => r.status === 'AMAN');
+  const overstockItems = results.filter((r) => r.status === 'OVERSTOCK');
+
+  const totalInventoryValue = results.reduce((sum, r) => sum + r.inventoryValue, 0);
+  const totalSaranOrderValue = results.reduce((sum, r) => sum + r.saranOrderQty * r.unitCost, 0);
+
+  const topKritis = kritisItems
+    .sort((a, b) => a.coverageDays - b.coverageDays)
+    .slice(0, 10)
+    .map((r) => ({
+      skuName: r.skuName,
+      doi: r.doi === Infinity ? '∞' : r.doi.toFixed(1),
+      coverageDays: r.coverageDays.toFixed(1),
+      entitas: r.entitas,
+    }));
+
+  return {
+    kritisCount: kritisItems.length,
+    amanCount: amanItems.length,
+    overstockCount: overstockItems.length,
+    totalInventoryValue,
+    totalSaranOrderValue,
+    topKritis,
   };
 }
 

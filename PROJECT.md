@@ -290,7 +290,34 @@ Auto-deploys to the aliased production URL `inventory-control-five.vercel.app`.
       - [x] **Picking List UI**: allocation + confirmed tables show Seq, Rak, Zona, SKU, Qty,
             Expired, Sisa Hari, and colour-coded Status FEFO.
 
+- [x] **Phase 1 — Opname Discipline & Picking List Generator** (see
+      `docs/superpowers/specs/2026-11-26-opname-fefo-enforcement-design.md`):
+      - [x] **Nav rename**: "Outbound" → **"Picking List Generator"** (sidebar + page titles).
+      - [x] **Opname DB schema** (`supabase/migrations/20261126100000_opname_enhancements.sql`):
+            `catalog.unit_cost`; `stock_opname.selisih_rp`, `tolerance_status`, `petugas`, `catatan`.
+      - [x] **Unit-cost seeding** (`seedUnitCost()` in `src/lib/db.ts`) + `/api/stock-opname?action=seed-cost`.
+      - [x] **Goods-per-Rack Opname**: `/api/stock-opname?action=list` now reads actual
+            inventory lots (via `getInventoryLots`) so every rack/SKU on hand appears for counting,
+            merged with unit cost, Rupiah variance, and tolerance status — not just prior counts.
+      - [x] **Opname UI** (`src/app/opname/page.tsx`): summary cards (SKU counted, overall accuracy,
+            net Rupiah variance, items needing investigation), **Prioritas Hari Ini** vs **Semua SKU**
+            tabs, dynamic priority queue, status badges (`Akurat`/`Toleransi`/`Selisih`),
+            per-row `Harga Satuan`, `Selisih Rp`, `Akurasi`; logs `petugas` from session.
+      - [x] **FEFO allocation engine** (`/api/outbound/allocate`): strict expiry-ascending sort,
+            `daysToExpiry` + `fefoStatus` (OK/KRITIS/SEGERA/HARI INI/EXPIRED), zone-ordered pick
+            sequence (RACKING→FLOOR→CONTAINER→FREEZER) with numeric rack collation,
+            `shortages` + `fefoOrder` audit payload.
+      - [x] **FEFO enforcement** (`/api/outbound/confirm`): blocks confirmation when an
+            earlier-expiring lot of the same SKU still has stock, or when requested qty exceeds
+            the lot's available stock — returns explicit Indonesian violation messages.
+      - [x] **Picking List UI**: allocation + confirmed tables show Seq, Rak, Zona, SKU, Qty,
+            Expired, Sisa Hari, and colour-coded Status FEFO.
+      - [x] **Production Deployment**: Project migrated to new Vercel account (`ai-468b`)
+            live at `https://inventory-control-six-mu.vercel.app`.
+
 ### 🔧 Known Issues / Follow-ups
+- [ ] Data Quality: High number of lots with `NULL` expiry dates impact FEFO accuracy. Requires process change at inbound.
+- [ ] Data Quality: 15 SKUs have zero unit cost, affecting valuation and ROP calculations.
 - [ ] Verify end-to-end outbound test after the `Picking_List` header reset
       (PDF → allocate → confirm with RO → export) — user to confirm Excel opens cleanly.
 - [ ] Update all UI pages (Dashboard, Inbound, Outbound, Opname) to filter by Entity.
@@ -300,12 +327,17 @@ Auto-deploys to the aliased production URL `inventory-control-five.vercel.app`.
 - [ ] Consider password reset UI (API `updateUserPassword` exists, not exposed).
 
 ### ⏭️ Likely Next Steps
-1. Update all UI pages (Dashboard, Inbound, Outbound, Opname) to filter by Entity. This is critical now that the catalog is split.
-2. Wire up (**optional**) user delete + password reset to the `/users` page.
-3. Add audit trail (who changed which role, when).
-4. Confirm the outbound Excel export is clean in a live test.
-5. Harden PDF parsing against additional Accurate templates.
-6. Review role granularity (e.g. operator access to `/outbound`).
+1. **Phase 2: Inventory Calculator & Auto ROP** (see spec below):
+   - Port the Excel `Calculator` sheet logic to Next.js (DOI, ROP, Safety Stock, Coverage status).
+   - Real-time Dashboard alerts for `KRITIS` (stockout risk) and `Overstock` items.
+   - Auto-generate PO suggestions (`Saran Order`) based on forecast + safety stock.
+   - Demand forecasting from historical `History` sheet (weighted moving average).
+2. Update all UI pages (Dashboard, Inbound, Outbound, Opname) to filter by Entity.
+3. Wire up (**optional**) user delete + password reset to the `/users` page.
+4. Add audit trail (who changed which role, when).
+5. Confirm the outbound Excel export is clean in a live test.
+6. Harden PDF parsing against additional Accurate templates.
+7. Review role granularity (e.g. operator access to `/outbound`).
 
 ---
 

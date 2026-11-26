@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getFullDashboard, EntityFilter } from '@/lib/google-sheets';
+import { getFullDashboard, getCalculatorSummary, EntityFilter } from '@/lib/google-sheets';
 
 export async function GET(request: Request) {
   try {
@@ -8,8 +8,15 @@ export async function GET(request: Request) {
     
     const validEntity: EntityFilter = (ent === 'BBB' || ent === 'BBT' || ent === 'ALL') ? ent : 'BBB';
     
-    const data = await getFullDashboard(validEntity);
-    return NextResponse.json(data);
+    const [dashboardData, calculatorSummary] = await Promise.all([
+      getFullDashboard(validEntity),
+      getCalculatorSummary(validEntity),
+    ]);
+
+    return NextResponse.json({
+      ...dashboardData,
+      calculatorSummary,
+    });
   } catch (error) {
     console.error('Dashboard API error:', error);
     return NextResponse.json(

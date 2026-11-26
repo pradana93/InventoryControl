@@ -26,7 +26,19 @@ import {
   Clock,
   ShieldCheck,
   Building2,
+  AlertTriangle,
+  CheckCircle2,
+  Boxes,
+  DollarSign,
+  ShoppingCart,
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
 } from 'lucide-react';
+import Link from 'next/link';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
 
 interface FefoLot {
@@ -38,6 +50,20 @@ interface FefoLot {
   statusFefo: string;
   category: string;
   entitas?: string;
+}
+
+interface CalculatorSummary {
+  kritisCount: number;
+  amanCount: number;
+  overstockCount: number;
+  totalInventoryValue: number;
+  totalSaranOrderValue: number;
+  topKritis: Array<{
+    skuName: string;
+    doi: string;
+    coverageDays: string;
+    entitas: string;
+  }>;
 }
 
 interface DashboardViewProps {
@@ -107,6 +133,7 @@ export function DashboardView({ initialEntity }: DashboardViewProps) {
   const [skuData, setSkuData] = useState<any[]>([]);
   const [detailData, setDetailData] = useState<any[]>([]);
   const [tablesLoading, setTablesLoading] = useState(true);
+  const [showKritis, setShowKritis] = useState(true);
 
   // Load tables once (heavy payload, not streamed)
   useEffect(() => {
@@ -173,7 +200,7 @@ export function DashboardView({ initialEntity }: DashboardViewProps) {
 
   if (!data) return null;
 
-  const { summary, alerts, charts } = data;
+  const { summary, alerts, charts, calculatorSummary } = data;
 
   const num = (v: unknown, fallback = 0): number =>
     typeof v === 'number' && Number.isFinite(v) ? v : fallback;
@@ -204,6 +231,14 @@ export function DashboardView({ initialEntity }: DashboardViewProps) {
     },
     { title: 'Slot Kosong', value: emptySlots.toLocaleString(), icon: <MinusCircle className="h-8 w-8" /> },
   ];
+
+  const calc: CalculatorSummary | undefined = calculatorSummary;
+  const kritisCount = num(calc?.kritisCount);
+  const amanCount = num(calc?.amanCount);
+  const overstockCount = num(calc?.overstockCount);
+  const totalInventoryValue = num(calc?.totalInventoryValue);
+  const totalSaranOrderValue = num(calc?.totalSaranOrderValue);
+  const topKritis = calc?.topKritis ?? [];
 
   return (
     <div className="space-y-6">
@@ -254,6 +289,86 @@ export function DashboardView({ initialEntity }: DashboardViewProps) {
 
       {/* Alerts */}
       <AlertBanner expired={alerts?.expired ?? []} expiring={alerts?.expiring ?? []} outOfStock={alerts?.outOfStock ?? []} />
+
+      {/* Calculator KPIs */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <KPICard
+          title="Barang KRITIS"
+          value={kritisCount.toLocaleString()}
+          icon={<AlertTriangle className="h-8 w-8" color="#dc2626" />}
+          className="bg-destructive/10"
+        />
+        <KPICard
+          title="Barang AMAN"
+          value={amanCount.toLocaleString()}
+          icon={<ShieldCheck className="h-8 w-8" color="#10b981" />}
+          className="bg-emerald-500/10"
+        />
+        <KPICard
+          title="Stok Berlebih"
+          value={overstockCount.toLocaleString()}
+          icon={<PackageX className="h-8 w-8" color="#a1a1aa" />}
+          className="bg-muted/20"
+        />
+        <KPICard
+          title="Nilai Total Inventaris"
+          value={`Rp ${totalInventoryValue.toLocaleString('id-ID', { minimumFractionDigits: 0 })}`}
+          icon={<DollarSign className="h-8 w-8" />}
+        />
+        <KPICard
+          title="Nilai Saran Order"
+          value={`Rp ${totalSaranOrderValue.toLocaleString('id-ID', { minimumFractionDigits: 0 })}`}
+          icon={<ShoppingCart className="h-8 w-8" />}
+        />
+      </div>
+
+      {/* Top 10 KRITIS SKUs */}
+      {showKritis && topKritis.length > 0 && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <div className="grid gap-1">
+              <CardTitle className="text-lg">Top 10 KRITIS SKU (Risiko Stockout)</CardTitle>
+              <p className="text-xs text-muted-foreground">
+                Item dengan coverage terendah dalam 30 hari ke depan.
+              </p>
+            </div>
+            <Button variant="ghost" size="icon" onClick={() => setShowKritis(false)}>
+              <ExternalLink className="h-4 w-4" />
+            </Button>
+          </CardHeader>
+          <CardContent className="pl-4">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-1/5">SKU Name</TableHead>
+                  <TableHead className="w-1/5">Entitas</TableHead>
+                  <TableHead className="w-1/5 text-right">DOI (Hari)</TableHead>
+                  <TableHead className="w-1/5 text-right">Coverage (Hari)</TableHead>
+                  <TableHead className="w-1/5 text-center">Opname</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {topKritis.map((item, i) => (
+                  <TableRow key={i} className="hover:bg-muted/30">
+                    <TableCell className="font-medium truncate">{item.skuName}</TableCell>
+                    <TableCell>{item.entitas}</TableCell>
+                    <TableCell className="text-right">{item.doi}</TableCell>
+                    <TableCell className="text-right">{item.coverageDays}</TableCell>
+                    <TableCell className="text-center">
+                      <Link
+                        href={`/opname?search=${item.skuName}`}
+                        className="text-blue-500 hover:underline"
+                      >
+                        Opname
+                      </Link>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Charts Row 1: Top SKU + Zone */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

@@ -16,6 +16,19 @@ export interface DashboardSummary {
 
 export interface DashboardData {
   summary: DashboardSummary;
+  calculatorSummary?: {
+    kritisCount: number;
+    amanCount: number;
+    overstockCount: number;
+    totalInventoryValue: number;
+    totalSaranOrderValue: number;
+    topKritis: Array<{
+      skuName: string;
+      doi: string;
+      coverageDays: string;
+      entitas: string;
+    }>;
+  };
   alerts: {
     expired: Array<{ namaBarang: string; nomorRak: string; qty: number; expiredDate: string; entitas?: string }>;
     expiring: Array<{ namaBarang: string; nomorRak: string; qty: number; expiredDate: string; daysLeft: number; entitas?: string }>;
