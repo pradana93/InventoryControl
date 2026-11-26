@@ -1,6 +1,7 @@
 
 // src/lib/inventory-calculator.ts
 import { CatalogEntry, LedgerEntry, InventoryLot } from './db';
+import { calculateForecast } from './forecast';
 
 export interface CalculatorResult {
   skuName: string;
@@ -102,12 +103,12 @@ export function calculateInventoryMetrics(input: CalculatorInput): CalculatorRes
     // 2j. inventoryValue
     const inventoryValue = currentStock * unitCost;
 
-    // 2k. Forecast: Weighted Moving Average of last 5 months outbound history
-    // Month 0 is current month (most recent), Month 4 is 4 months ago (oldest)
-    const monthlyOutbound: number[] = [];
+    // 2k. Forecast: Weighted Moving Average of last 5 months outbound history.
+    // Build monthlyHistory (oldest -> newest) by grouping outbound ledger
+    // transactions per month over the last 12 months.
+    const monthlyHistory: number[] = [];
     const today = new Date();
-
-    for (let i = 0; i < 5; i++) {
+    for (let i = 11; i >= 0; i--) {
       const monthStart = new Date(today.getFullYear(), today.getMonth() - i, 1);
       const monthEnd = new Date(today.getFullYear(), today.getMonth() - i + 1, 0, 23, 59, 59, 999);
 
@@ -120,41 +121,11 @@ export function calculateInventoryMetrics(input: CalculatorInput): CalculatorRes
             new Date(entry.timestamp) <= monthEnd
         )
         .reduce((sum, entry) => sum + Math.abs(entry.qtyIn), 0);
-      monthlyOutbound.push(monthlyOutboundQty);
+      monthlyHistory.push(monthlyOutboundQty);
     }
 
-    // Determine how many months have outbound data (> 0)
-    const monthsWithData = monthlyOutbound.filter((qty) => qty > 0);
-
-    let forecast30d = 0;
-    let forecastPerDay = 0;
-    let forecastStatus: 'OK' | 'LOW_DATA' = 'OK';
-    let forecastMethod: string = 'WMA-5m';
-
-    if (monthsWithData.length < 3) {
-      forecastStatus = 'LOW_DATA';
-      forecastMethod = 'SIMPLE-AVG';
-      if (monthsWithData.length > 0) {
-        const totalOutbound = monthsWithData.reduce((sum, qty) => sum + qty, 0);
-        forecastPerDay = totalOutbound / monthsWithData.length / 30;
-      } else {
-        forecastPerDay = 0;
-      }
-    } else {
-      // WMA-5m: weights 5, 4, 3, 2, 1 for monthlyOutbound[0]..[4]
-      let weightedSum = 0;
-      const weights = [5, 4, 3, 2, 1];
-      const sumOfWeights = 15;
-
-      for (let i = 0; i < 5; i++) {
-        weightedSum += monthlyOutbound[i] * weights[i];
-      }
-
-      const weightedMonthlyAvg = weightedSum / sumOfWeights;
-      forecastPerDay = weightedMonthlyAvg / 30;
-    }
-    forecast30d = forecastPerDay * 30;
-
+    const forecast = calculateForecast(monthlyHistory);
+    const { forecast30d, forecastPerDay, forecastStatus, forecastMethod } = forecast;
 
     results.push({
       skuName,
