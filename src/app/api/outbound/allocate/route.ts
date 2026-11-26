@@ -1,13 +1,62 @@
 import { NextResponse } from 'next/server';
-import { getLedger, getWarehouse, getCatalog } from '@/lib/google-sheets';
+import { getLedger, getWarehouse, getCatalog, EntityFilter } from '@/lib/google-sheets';
 
 export const dynamic = 'force-dynamic';
 
+// Zone ordering for the picker walking path. Lower = picked first.
+const ZONE_ORDER: Record<string, number> = {
+  RACKING: 1,
+  FLOOR: 2,
+  CONTAINER: 3,
+  FREEZER: 4,
+};
+
+function zoneRank(zone: string): number {
+  return ZONE_ORDER[(zone || '').toUpperCase()] ?? 99;
+}
+
+/**
+ * Parse an ISO (YYYY-MM-DD) expiry into a comparable timestamp.
+ * Invalid / missing dates sort last so they are only picked after real lots.
+ */
+function expiryTime(expiredDate: string): number {
+  if (!expiredDate) return Number.POSITIVE_INFINITY;
+  const t = new Date(expiredDate + 'T00:00:00').getTime();
+  return isNaN(t) ? Number.POSITIVE_INFINITY : t;
+}
+
+function daysToExpiry(expiredDate: string): number {
+  const t = expiryTime(expiredDate);
+  if (!isFinite(t)) return 9999;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((t - today.getTime()) / 86400000);
+}
+
+function fefoLabel(days: number): string {
+  if (days === 9999) return '-';
+  if (days < 0) return 'EXPIRED';
+  if (days === 0) return 'HARI INI';
+  if (days <= 7) return 'KRITIS';
+  if (days <= 30) return 'SEGERA';
+  return 'OK';
+}
+
 /**
  * FEFO Allocation + Rack Sequencing Engine
- * 
- * Input: { lines: [{ skuName, qtyOrdered, matchedSkuId }] }
- * Output: { allocations: [{ rackId, skuName, qtyAllocated, expiredDate, zone, sequence }] }
+ *
+ * Enforces First-Expired-First-Out: each requested SKU is allocated from its
+ * lots in ascending expiry order (earliest expiry consumed first), then the
+ * resulting pick points are sequenced along the warehouse walking path
+ * (zone order, then rack id natural order).
+ *
+ * Input:  { lines: [{ skuName, qtyOrdered, matchedSkuId }], entitas: 'BBB' | 'BBT' }
+ * Output: {
+ *   allocations: [{ rackId, skuName, qtyAllocated, expiredDate, expiredLabel,
+ *                   daysToExpiry, fefoStatus, zone, sequence }],
+ *   shortages:   [{ skuName, requested, allocated, short }],
+ *   fefoOrder:   [{ skuName, lots: [{ rackId, expiredDate, expiredLabel }] }]
+ * }
  */
 export async function POST(request: Request) {
   try {
@@ -24,17 +73,16 @@ export async function POST(request: Request) {
     }
 
     // Fetch all data
-    const [allLedger, allWarehouse, catalog] = await Promise.all([
+    const [allLedger, allWarehouse] = await Promise.all([
       getLedger(),
       getWarehouse(),
-      getCatalog(),
     ]);
 
     // Filter to the entity's racks
     const entityWarehouse = allWarehouse.filter(w => w.entitas === entitas);
     const entityRackIds = new Set(entityWarehouse.map(w => w.rackId));
 
-    const ledger = allLedger.filter(e => 
+    const ledger = allLedger.filter(e =>
       (e.entitas === entitas) || entityRackIds.has(e.rackId)
     );
     const warehouse = entityWarehouse;
@@ -71,52 +119,68 @@ export async function POST(request: Request) {
     // Only keep lots that still have stock on hand.
     const stockLots = Array.from(lotMap.values()).filter(l => l.qty > 0);
 
-    // Aggregate by SKU -> Rack -> Expiry
-    const skuRackExpiry = new Map<string, Array<{
-      rackId: string;
-      qty: number;
-      expiredDate: string;
-      expiredLabel: string;
-    }>>();
+    // Aggregate by SKU -> array of lots
+    const skuLots = new Map<string, Array<Lot>>();
 
     for (const lot of stockLots) {
       const key = lot.skuName.toLowerCase();
-      if (!skuRackExpiry.has(key)) skuRackExpiry.set(key, []);
-      skuRackExpiry.get(key)!.push({
-        rackId: lot.rackId,
-        qty: lot.qty,
-        expiredDate: lot.expiredDate,
-        expiredLabel: lot.expiredLabel,
+      if (!skuLots.has(key)) skuLots.set(key, []);
+      skuLots.get(key)!.push(lot);
+    }
+
+    // FEFO: sort each SKU's lots by strict expiry ascending (earliest first).
+    // Tie-break by rack id so the pick path is deterministic.
+    for (const lots of skuLots.values()) {
+      lots.sort((a, b) => {
+        const ta = expiryTime(a.expiredDate);
+        const tb = expiryTime(b.expiredDate);
+        if (ta !== tb) return ta - tb;
+        return a.rackId.localeCompare(b.rackId);
       });
     }
 
-    // Sort each SKU's lots by expiry ASC (FEFO)
-    for (const lots of skuRackExpiry.values()) {
-      lots.sort((a, b) => (a.expiredDate || '').localeCompare(b.expiredDate || ''));
-    }
-
-    // Zone ordering for rack sequencing
-    const zoneOrder: Record<string, number> = {
-      'RACKING': 1,
-      'FLOOR': 2,
-      'CONTAINER': 3,
-      'FREEZER': 4,
-    };
-
-    // Warehouse map for zone lookup
     const warehouseMap = new Map(warehouse.map(w => [w.rackId, w.jenisLokasi]));
 
-    const allocations = [];
-    let globalSequence = 1;
+    interface Allocation {
+      rackId: string;
+      skuName: string;
+      qtyAllocated: number;
+      expiredDate: string;
+      expiredLabel: string;
+      daysToExpiry: number;
+      fefoStatus: string;
+      zone: string;
+      sequence: number;
+    }
 
-    // Process each requested line
+    const allocations: Allocation[] = [];
+    const shortages: Array<{ skuName: string; requested: number; allocated: number; short: number }> = [];
+    const fefoOrder: Array<{ skuName: string; lots: Array<{ rackId: string; expiredDate: string; expiredLabel: string; qty: number }> }> = [];
+
+    // Process each requested line, consuming earliest-expiry lots first.
     for (const line of lines) {
-      const skuKey = line.skuName.toLowerCase();
-      const availableLots = skuRackExpiry.get(skuKey) || [];
-      let remaining = line.qtyOrdered;
+      const skuKey = String(line.skuName || '').toLowerCase();
+      const availableLots = skuLots.get(skuKey) || [];
+      let remaining = Number(line.qtyOrdered) || 0;
+      const requested = remaining;
+      let allocatedForLine = 0;
+
+      // Record the full FEFO order for this SKU (for review / audit).
+      if (availableLots.length > 0) {
+        fefoOrder.push({
+          skuName: line.skuName,
+          lots: availableLots.map(l => ({
+            rackId: l.rackId,
+            expiredDate: l.expiredDate,
+            expiredLabel: l.expiredLabel,
+            qty: l.qty,
+          })),
+        });
+      }
 
       if (availableLots.length === 0) {
         console.warn(`No stock for SKU: ${line.skuName}`);
+        shortages.push({ skuName: line.skuName, requested, allocated: 0, short: requested });
         continue;
       }
 
@@ -124,39 +188,51 @@ export async function POST(request: Request) {
       for (const lot of availableLots) {
         if (remaining <= 0) break;
         const take = Math.min(remaining, lot.qty);
-        
+
         if (take > 0) {
+          const dte = daysToExpiry(lot.expiredDate);
           allocations.push({
             rackId: lot.rackId,
             skuName: line.skuName,
             qtyAllocated: take,
             expiredDate: lot.expiredDate,
             expiredLabel: lot.expiredLabel,
+            daysToExpiry: dte,
+            fefoStatus: fefoLabel(dte),
             zone: warehouseMap.get(lot.rackId) || 'UNKNOWN',
-            sequence: globalSequence++,
+            sequence: 0, // renumbered after sorting
           });
           lot.qty -= take;
           remaining -= take;
+          allocatedForLine += take;
         }
       }
 
       if (remaining > 0) {
         console.warn(`Partial allocation for ${line.skuName}: short by ${remaining}`);
+        shortages.push({
+          skuName: line.skuName,
+          requested,
+          allocated: allocatedForLine,
+          short: remaining,
+        });
       }
     }
 
-    // Sort allocations by zone order, then rack ID (picking path)
+    // Sequence along the picking path: zone order, then rack id natural order.
+    // rack id natural order handles e.g. A01-1 < A01-2 < A01-10 correctly.
+    const rackCollator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
     allocations.sort((a, b) => {
-      const zoneA = zoneOrder[a.zone] || 99;
-      const zoneB = zoneOrder[b.zone] || 99;
+      const zoneA = zoneRank(a.zone);
+      const zoneB = zoneRank(b.zone);
       if (zoneA !== zoneB) return zoneA - zoneB;
-      return a.rackId.localeCompare(b.rackId);
+      return rackCollator.compare(a.rackId, b.rackId);
     });
 
-    // Re-number sequence after sorting
+    // Re-number sequence after sorting (1-based pick order).
     allocations.forEach((a, i) => { a.sequence = i + 1; });
 
-    return NextResponse.json({ allocations });
+    return NextResponse.json({ allocations, shortages, fefoOrder });
   } catch (error) {
     console.error('Allocation error:', error);
     return NextResponse.json(

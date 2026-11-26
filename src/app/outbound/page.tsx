@@ -54,6 +54,8 @@ interface AllocationResult {
   qtyAllocated: number;
   expiredDate: string;
   expiredLabel: string;
+  daysToExpiry: number;
+  fefoStatus: string;
   zone: string;
   sequence: number;
 }
@@ -573,6 +575,8 @@ function OutboundPageContent() {
                     <TableHead>SKU</TableHead>
                     <TableHead>Qty Pick</TableHead>
                     <TableHead>Expired</TableHead>
+                    <TableHead>Sisa Hari</TableHead>
+                    <TableHead>Status FEFO</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -586,6 +590,16 @@ function OutboundPageContent() {
                       <TableCell>{a.skuName}</TableCell>
                       <TableCell className="font-bold">{a.qtyAllocated}</TableCell>
                       <TableCell>{a.expiredLabel}</TableCell>
+                      <TableCell>{a.daysToExpiry === 9999 ? '-' : `${a.daysToExpiry} hari`}</TableCell>
+                      <TableCell>
+                        <span className={`inline-flex px-2 py-0.5 rounded text-xs font-semibold ${
+                          a.fefoStatus === 'EXPIRED' ? 'bg-red-500/20 text-red-300' :
+                          a.fefoStatus === 'KRITIS' ? 'bg-amber-500/20 text-amber-300' :
+                          'bg-emerald-500/20 text-emerald-300'
+                        }`}>
+                          {a.fefoStatus}
+                        </span>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -743,6 +757,8 @@ function OutboundPageContent() {
                         <TableHead>SKU</TableHead>
                         <TableHead>Qty Pick</TableHead>
                         <TableHead>Expired</TableHead>
+                        <TableHead>Sisa Hari</TableHead>
+                        <TableHead>Status FEFO</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -756,6 +772,16 @@ function OutboundPageContent() {
                           <TableCell>{a.skuName}</TableCell>
                           <TableCell className="font-bold">{a.qtyAllocated}</TableCell>
                           <TableCell>{a.expiredLabel}</TableCell>
+                          <TableCell>{a.daysToExpiry === 9999 ? '-' : `${a.daysToExpiry} hari`}</TableCell>
+                          <TableCell>
+                            <span className={`inline-flex px-2 py-0.5 rounded text-xs font-semibold ${
+                              a.fefoStatus === 'EXPIRED' ? 'bg-red-500/20 text-red-300' :
+                              a.fefoStatus === 'KRITIS' ? 'bg-amber-500/20 text-amber-300' :
+                              'bg-emerald-500/20 text-emerald-300'
+                            }`}>
+                              {a.fefoStatus}
+                            </span>
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
