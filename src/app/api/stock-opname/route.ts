@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { updateStockOpnameSOH, syncStockOpnameWithSystem, getStockOpname, getWarehouse, EntityFilter } from '@/lib/google-sheets';
+import { updateStockOpnameSOH, syncStockOpnameWithSystem, getStockOpname, getWarehouse, EntityFilter, seedUnitCost, getCatalog, getInventoryLots } from '@/lib/google-sheets';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,24 +12,68 @@ export async function GET(request: Request) {
 
     switch (action) {
       case 'list': {
-        const [opname, warehouse] = await Promise.all([
-          getStockOpname(),
+        const [inventoryLots, warehouse, catalog] = await Promise.all([
+          getInventoryLots(),
           getWarehouse(),
+          getCatalog(),
         ]);
 
-        // Filter by entity
+        // Map catalog unit cost by lowercase SKU name
+        const costMap = new Map(catalog.map(c => [c.namaBarang.toLowerCase(), c.unitCost]));
+
+        // Filter inventory lots by entity
         const entityWarehouse = entity && entity !== 'ALL'
           ? warehouse.filter(w => w.entitas === entity)
           : warehouse;
         const entityRackIds = new Set(entityWarehouse.map(w => w.rackId));
 
-        const filtered = opname.filter(o => entityRackIds.has(o.rackId));
-        return NextResponse.json(filtered);
+        const filteredAndMapped = inventoryLots
+          .filter(l => entityRackIds.has(l.nomorRak))
+          .map(l => {
+            const unitCost = costMap.get(l.namaBarang.toLowerCase()) || 0;
+            const variance = l.soh - l.qtySistem; // already calculated by getInventoryLots
+            const selisihRp = variance * unitCost;
+
+            // Determine tolerance status
+            const absVariance = Math.abs(variance);
+            const akurasiPct = l.qtySistem > 0 ? (l.soh / l.qtySistem) * 100 : 100;
+            const accuracyDiff = 100 - akurasiPct;
+            let toleranceStatus: 'Akurat' | 'Toleransi' | 'Selisih';
+            if (absVariance === 0) {
+              toleranceStatus = 'Akurat';
+            } else if (absVariance <= 1 || accuracyDiff <= 1.0) {
+              toleranceStatus = 'Toleransi';
+            } else {
+              toleranceStatus = 'Selisih';
+            }
+
+            return {
+              rackId: l.nomorRak,
+              skuName: l.namaBarang,
+              qtySistem: l.qtySistem,
+              qtyFisikSOH: l.soh,
+              variance: variance,
+              selisihRp: selisihRp,
+              toleranceStatus: toleranceStatus,
+              akurasi: `${l.akurasi.toFixed(2)}%`,
+              tanggalOpname: l.tanggalInbound, // Using inbound date for simplicity, can be updated later
+              petugas: '', // Will be populated from stock_opname table during actual save
+              catatan: '', // Will be populated from stock_opname table during actual save
+              unitCost: unitCost,
+            };
+          });
+
+        return NextResponse.json(filteredAndMapped);
       }
 
       case 'sync': {
         await syncStockOpnameWithSystem();
         return NextResponse.json({ success: true, message: 'Stock Opname synchronized with system quantities.' });
+      }
+
+      case 'seed-cost': {
+        const result = await seedUnitCost();
+        return NextResponse.json({ success: true, message: 'Unit costs seeded successfully.', result });
       }
 
       default:

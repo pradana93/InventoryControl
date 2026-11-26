@@ -468,7 +468,7 @@ function OutboundPageContent() {
     <div className="p-6 space-y-6 max-w-6xl mx-auto">
       <div className="flex items-center gap-3 flex-wrap">
         <h1 className="text-2xl font-bold flex items-center gap-2">
-          <FileText className="h-6 w-6" /> Outbound & Picking List
+          <FileText className="h-6 w-6" /> Picking List Generator & Alokasi FEFO
         </h1>
         <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${ENTITY_COLORS[entity].badge}`}>
           <Globe className="h-3 w-3" /> {entityLabel}
@@ -530,7 +530,7 @@ function OutboundPageContent() {
                   <Printer className="mr-2 h-4 w-4" /> Print
                 </Button>
                 <Button variant="outline" onClick={handleNewOutbound}>
-                  <Upload className="mr-2 h-4 w-4" /> Outbound Baru
+                  <Upload className="mr-2 h-4 w-4" /> Buat Picking List Baru
                 </Button>
               </div>
             </CardTitle>
@@ -728,7 +728,7 @@ function OutboundPageContent() {
                   3. Hasil Alokasi & Urutan Pick ({allocations.length} pick points)
                   <Button onClick={openConfirmDialog} disabled={allocating}>
                     {allocating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-                    Konfirmasi Outbound
+                    Konfirmasi Picking List
                   </Button>
                 </CardTitle>
               </CardHeader>

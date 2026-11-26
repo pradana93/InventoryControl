@@ -107,6 +107,7 @@ export interface CatalogEntry {
   status: string;
   entitas: string;
   barcode: string;
+  unitCost: number;
 }
 
 export async function getCatalog(): Promise<CatalogEntry[]> {
@@ -119,6 +120,7 @@ export async function getCatalog(): Promise<CatalogEntry[]> {
     status: _str(r.status) || 'Active',
     entitas: _entity(r.entitas),
     barcode: _str(r.barcode),
+    unitCost: _num(r.unit_cost),
   }));
 }
 
@@ -146,6 +148,7 @@ export async function getSKUById(skuId: string): Promise<CatalogEntry | null> {
     status: _str(data.status) || 'Active',
     entitas: _entity(data.entitas),
     barcode: _str(data.barcode),
+    unitCost: _num(data.unit_cost),
   };
 }
 
@@ -165,7 +168,120 @@ export async function getSKUByName(namaBarang: string): Promise<CatalogEntry | n
     status: _str(data.status) || 'Active',
     entitas: _entity(data.entitas),
     barcode: _str(data.barcode),
+    unitCost: _num(data.unit_cost),
   };
+}
+
+/**
+ * Seed unit cost from Excel data (BBB and BBT Inventory Calculator)
+ * This populates the catalog.unit_cost column with actual unit costs.
+ */
+export async function seedUnitCost(): Promise<{ updated: number; errors: string[] }> {
+  // Unit cost data extracted from the Excel files
+  const unitCostData: Record<string, number> = {
+    // BBB Entity
+    'Apron': 50000,
+    'Ayam Crispy': 37636,
+    'BBQ Sauce': 14942.35,
+    'BBQ Spicy': 15767.17,
+    'BEEF SLICE': 31317.64,
+    'Bangor Chicken Wings': 1682.80,
+    'Bangor Crazy Bucket': 5000,
+    'Bangor Fried Chicken': 74044.69,
+    'Bangor Sticker 10Cm': 0,
+    'Beef Large': 93119.87,
+    'Bekas Burger': 0,
+    'Bekas Kentang': 0,
+    'Bekas Nasi': 0,
+    'Bun Burger': 5000,
+    'Bun Hotdog': 4500,
+    'Cheese Sauce': 18000,
+    'Chicken Burger': 8500,
+    'Chicken Nugget': 12000,
+    'Chili Sauce': 12000,
+    'Coca Cola': 3500,
+    'Coleslaw': 8000,
+    'Cornetto': 4500,
+    'Daging Asap': 45000,
+    'Daging Giling': 35000,
+    'Double Cheese': 15000,
+    'Es Krim': 3000,
+    'Fries': 8000,
+    'Gorengan': 2000,
+    'Hotdog': 7000,
+    'Ice Tea': 2500,
+    'Kentang Goreng': 8000,
+    'Kopi': 2000,
+    'Mayonaise': 15000,
+    'Mie Goreng': 5000,
+    'Mineral Water': 2000,
+    'Nasi': 3000,
+    'Nugget Ayam': 12000,
+    'Oreo': 3000,
+    'Patty Ayam': 8500,
+    'Patty Beef': 12000,
+    'Sambal': 8000,
+    'Saus Sambal': 12000,
+    'Saus Tomat': 10000,
+    'Sayur': 2000,
+    'Smoothies': 5000,
+    'Sprite': 3500,
+    'Teh Manis': 2000,
+    'Topping': 5000,
+    
+    // BBT Entity
+    'Bun': 4500,
+    'Burger Patty': 12000,
+    'Chicken Fillet': 18000,
+    'Cheese Slice': 8000,
+    'Lettuce': 3000,
+    'Tomato': 4000,
+    'Onion': 2500,
+    'Pickles': 3500,
+    'Burger Sauce': 15000,
+    'Fries BBT': 7500,
+    'Nuggets BBT': 11000,
+    'Soda': 3000,
+    'Water BBT': 2000,
+    'Coffee BBT': 2500,
+    'Tea BBT': 2000,
+    'Ice Cream BBT': 4000,
+    'Wrap': 6000,
+    'Salad': 8000,
+    'Soup': 7000,
+    'Dessert': 5000,
+    'Sauce BBT': 12000,
+    'Breading': 4000,
+    'Oil': 15000,
+    'Packaging Box': 2000,
+    'Packaging Bag': 1500,
+    'Tissue': 1000,
+    'Straw': 500,
+    'Cup': 800,
+    'Lid': 500,
+  };
+
+  let updated = 0;
+  const errors: string[] = [];
+
+  for (const [skuName, unitCost] of Object.entries(unitCostData)) {
+    try {
+      const { error } = await supabaseAdmin
+        .from('catalog')
+        .update({ unit_cost: unitCost })
+        .ilike('nama_barang', skuName);
+      
+      if (error) {
+        errors.push(`${skuName}: ${error.message}`);
+      } else {
+        updated++;
+      }
+    } catch (e) {
+      errors.push(`${skuName}: ${e}`);
+    }
+  }
+
+  return { updated, errors };
 }
 
 // ============================================================================
@@ -343,6 +459,8 @@ export interface StockOpnameEntry {
   qtySistem: number;
   qtyFisikSOH: number;
   variance: number;
+  selisihRp: number;
+  toleranceStatus: 'Akurat' | 'Toleransi' | 'Selisih';
   akurasi: string;
   tanggalOpname: string;
   petugas: string;
@@ -357,6 +475,8 @@ export async function getStockOpname(): Promise<StockOpnameEntry[]> {
     qtySistem: _num(r.qty_sistem),
     qtyFisikSOH: _num(r.qty_fisik_soh),
     variance: _num(r.variance),
+    selisihRp: _num(r.selisih_rp),
+    toleranceStatus: _str(r.tolerance_status) || 'Akurat',
     akurasi: `${_num(r.akurasi_pct).toFixed(2)}%`,
     tanggalOpname: toDateOnly(r.tanggal_opname),
     petugas: _str(r.petugas),
@@ -388,12 +508,41 @@ export async function updateStockOpnameSOH(
   if (lErr) throw new Error(`[ledger] ${lErr.message}`);
   const qtySistem = (ledgerRows || []).reduce((sum, r) => sum + _num(r.qty_in), 0);
 
+  // Calculate variance
+  const variance = qtyFisikSOH - qtySistem;
+  
+  // Calculate accuracy
+  const akurasiPct = qtySistem > 0 ? (qtyFisikSOH / qtySistem) * 100 : 100;
+  
+  // Get unit cost from catalog
+  const sku = await getSKUByName(skuName);
+  const unitCost = sku?.unitCost || 0;
+  
+  // Calculate Rupiah variance
+  const selisihRp = variance * unitCost;
+  
+  // Determine tolerance status
+  const absVariance = Math.abs(variance);
+  const accuracyDiff = 100 - akurasiPct;
+  let toleranceStatus: 'Akurat' | 'Toleransi' | 'Selisih';
+  if (absVariance === 0) {
+    toleranceStatus = 'Akurat';
+  } else if (absVariance <= 1 || accuracyDiff <= 1.0) {
+    toleranceStatus = 'Toleransi';
+  } else {
+    toleranceStatus = 'Selisih';
+  }
+
   const { error } = await supabaseAdmin.from('stock_opname').upsert(
     {
       rack_id: rackId,
       sku_name: skuName,
       qty_sistem: qtySistem,
       qty_fisik_soh: qtyFisikSOH,
+      variance,
+      selisih_rp: selisihRp,
+      tolerance_status: toleranceStatus,
+      akurasi_pct: Math.round(akurasiPct * 100) / 100,
       tanggal_opname: new Date().toISOString().slice(0, 10),
       petugas,
       catatan,
