@@ -73,6 +73,10 @@ export const authOptions: any = {
   secret: process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET,
   trustHost: true,
   useSecureCookies: process.env.NODE_ENV === 'production',
+  pages: {
+    signIn: '/login',
+    error: '/error',
+  },
   cookies: {
     csrfToken: {
       name: '__Secure-authjs.csrf-token',
