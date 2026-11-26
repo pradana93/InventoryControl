@@ -55,6 +55,11 @@ export function useDashboardStream(entity: 'BBB' | 'BBT' | 'ALL') {
       const ent = entity === 'ALL' ? '' : entity;
       const url = `/api/dashboard${ent ? `?ent=${ent}` : ''}`;
       const res = await fetch(url, { cache: 'no-store' });
+      if (res.status === 401) {
+        // Session expired - redirect to login with current path as callback
+        window.location.href = `/login?callbackUrl=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+        return;
+      }
       if (!res.ok) throw new Error('Gagal memuat data dashboard');
       const json = await res.json();
       applyData(json);

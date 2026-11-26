@@ -174,6 +174,9 @@ export function EnhancedStockTables({ skuData, detailData }: EnhancedStockTables
     return <Badge variant={variants[status] || 'outline'} className="text-xs">{status}</Badge>;
   };
 
+  const fmtNum = (v: unknown): string =>
+    typeof v === 'number' && Number.isFinite(v) ? v.toLocaleString() : '0';
+
   const totalSkuPages = Math.ceil(filteredSku.length / PAGE_SIZE) || 1;
   const totalDetailPages = Math.ceil(filteredDetail.length / PAGE_SIZE) || 1;
 
@@ -249,8 +252,8 @@ export function EnhancedStockTables({ skuData, detailData }: EnhancedStockTables
                       <TableCell className="font-medium">{row.namaBarang}</TableCell>
                       <TableCell>{row.category || '-'}</TableCell>
                       <TableCell className="font-mono text-xs">{row.barcode || '-'}</TableCell>
-                      <TableCell className="text-right tabular-nums font-semibold">{row.totalQtySystem.toLocaleString()}</TableCell>
-                      <TableCell className="text-right tabular-nums">{row.totalSoh.toLocaleString()}</TableCell>
+                      <TableCell className="text-right tabular-nums font-semibold">{fmtNum(row.totalQtySystem)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmtNum(row.totalSoh)}</TableCell>
                       <TableCell className="text-right">{row.rackCount}</TableCell>
                       <TableCell>{row.earliestExpiryDate || '-'}</TableCell>
                       <TableCell>{getStatusBadge(row.statusFefo)}</TableCell>
@@ -328,20 +331,20 @@ export function EnhancedStockTables({ skuData, detailData }: EnhancedStockTables
                       <TableCell className="font-mono font-medium text-xs">{row.nomorRak}</TableCell>
                       <TableCell className="font-medium text-sm">{row.namaBarang}</TableCell>
                       <TableCell className="text-xs">{row.category || '-'}</TableCell>
-                      <TableCell className="text-right tabular-nums">{row.qtySistem.toLocaleString()}</TableCell>
-                      <TableCell className="text-right tabular-nums">{row.soh.toLocaleString()}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmtNum(row.qtySistem)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmtNum(row.soh)}</TableCell>
                       <TableCell
                         className={cn(
                           'text-right tabular-nums font-semibold',
                           row.variance < 0 ? 'text-destructive' : row.variance > 0 ? 'text-emerald-600' : ''
                         )}
                       >
-                        {row.variance >= 0 ? '+' : ''}{row.variance.toLocaleString()}
+                        {row.variance >= 0 ? '+' : ''}{fmtNum(row.variance)}
                       </TableCell>
-                      <TableCell className="text-right">{row.akurasi.toFixed(1)}%</TableCell>
+                      <TableCell className="text-right">{fmtNum(row.akurasi)}%</TableCell>
                       <TableCell>{getStatusBadge(row.statusFefo)}</TableCell>
-                      <TableCell className="text-center font-semibold text-xs">{row.urutanFefo}</TableCell>
-                      <TableCell className="text-right tabular-nums">{row.stockPicking.toLocaleString()}</TableCell>
+                      <TableCell className="text-center font-semibold text-xs">{row.urutanFefo ?? '-'}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmtNum(row.stockPicking)}</TableCell>
                       <TableCell className="text-xs">{row.expiredLabel || '-'}</TableCell>
                       <TableCell
                         className={cn(

@@ -13,6 +13,7 @@ import {
 } from '@/components/common/RechartsViews';
 import { EnhancedStockTables } from '@/components/dashboard/EnhancedStockTables';
 import { useDashboardStream } from '@/hooks/useDashboardStream';
+import { redirectToLoginIfUnauthorized } from '@/lib/client-auth';
 import {
   RefreshCw,
   Loader2,
@@ -43,6 +44,59 @@ interface DashboardViewProps {
   initialEntity: 'BBB' | 'BBT' | 'ALL';
 }
 
+/**
+ * Aggregates raw per-lot stock detail rows (from /api/sku?action=stock) into
+ * per-SKU summary rows expected by EnhancedStockTables. The API returns lots
+ * (with `qtySistem` / `soh`), not pre-aggregated SKU totals, so we roll them up.
+ */
+function aggregateBySku(lots: any[]): any[] {
+  const map = new Map<string, any>();
+
+  for (const lot of lots) {
+    if (!lot || !lot.namaBarang) continue;
+    const key = lot.namaBarang;
+    const qtySystem = numOr(lot.qtySistem);
+    const soh = numOr(lot.soh);
+    const daysToExpiry = numOr(lot.daysToExpiry, Number.POSITIVE_INFINITY);
+
+    const existing = map.get(key);
+    if (existing) {
+      existing.totalQtySystem += qtySystem;
+      existing.totalSoh += soh;
+      existing.rackCount += 1;
+      if (lot.nomorRak) existing.racks.push(lot.nomorRak);
+      if (lot.expiredLabel && lot.expiredLabel < existing.earliestExpiryDate) {
+        existing.earliestExpiryDate = lot.expiredLabel;
+      }
+    } else {
+      map.set(key, {
+        namaBarang: lot.namaBarang,
+        category: lot.category || '-',
+        barcode: lot.barcode || '-',
+        unit: lot.unit || '',
+        totalQtySystem: qtySystem,
+        totalSoh: soh,
+        rackCount: lot.nomorRak ? 1 : 0,
+        earliestExpiryDate: lot.expiredLabel || '-',
+        statusFefo: lot.statusFefo || 'OK',
+        racks: lot.nomorRak ? [lot.nomorRak] : [],
+        moreRacks: 0,
+      });
+    }
+    void daysToExpiry;
+  }
+
+  return Array.from(map.values()).map((row) => ({
+    ...row,
+    racks: row.racks.slice(0, 100),
+    moreRacks: Math.max(0, row.rackCount - 3),
+  }));
+}
+
+function numOr(v: unknown, fallback = 0): number {
+  return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+}
+
 export function DashboardView({ initialEntity }: DashboardViewProps) {
   const { data: session } = useSession();
   const role = (session?.user as any)?.role as string | undefined;
@@ -63,8 +117,10 @@ export function DashboardView({ initialEntity }: DashboardViewProps) {
           fetch(`/api/sku?action=stock${ent ? `&ent=${ent}` : ''}`),
           fetch(`/api/rack?action=detail${ent ? `&ent=${ent}` : ''}`),
         ]);
-        if (skuRes.ok) setSkuData(await skuRes.json());
+        if (redirectToLoginIfUnauthorized(skuRes) || redirectToLoginIfUnauthorized(detailRes)) return;
+        const rawLots = skuRes.ok ? await skuRes.json() : [];
         if (detailRes.ok) setDetailData(await detailRes.json());
+        setSkuData(aggregateBySku(Array.isArray(rawLots) ? rawLots : []));
       } catch (e) {
         console.error('Failed to load tables', e);
       } finally {
@@ -119,24 +175,34 @@ export function DashboardView({ initialEntity }: DashboardViewProps) {
 
   const { summary, alerts, charts } = data;
 
+  const num = (v: unknown, fallback = 0): number =>
+    typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+
+  const totalSKU = num(summary?.totalSKU);
+  const totalSystemQty = num(summary?.totalSystemQty);
+  const totalSOH = num(summary?.totalSOH);
+  const variance = num(summary?.variance);
+  const accuracy = num(summary?.accuracy, 100);
+  const emptySlots = num(summary?.emptySlots);
+
   const kpiItems = [
-    { title: 'Total SKU', value: summary.totalSKU.toLocaleString(), icon: <Package className="h-8 w-8" /> },
-    { title: 'Qty Sistem', value: summary.totalSystemQty.toLocaleString(), icon: <Package className="h-8 w-8" /> },
-    { title: 'Stok Fisik (SOH)', value: summary.totalSOH.toLocaleString(), icon: <CheckCircle className="h-8 w-8" /> },
+    { title: 'Total SKU', value: totalSKU.toLocaleString(), icon: <Package className="h-8 w-8" /> },
+    { title: 'Qty Sistem', value: totalSystemQty.toLocaleString(), icon: <Package className="h-8 w-8" /> },
+    { title: 'Stok Fisik (SOH)', value: totalSOH.toLocaleString(), icon: <CheckCircle className="h-8 w-8" /> },
     {
       title: 'Variance',
-      value: (summary.variance >= 0 ? '+' : '') + summary.variance.toLocaleString(),
-      trend: (summary.variance === 0 ? 'neutral' : summary.variance > 0 ? 'up' : 'down') as 'up' | 'down' | 'neutral',
-      trendValue: Math.abs(summary.variance).toLocaleString(),
+      value: (variance >= 0 ? '+' : '') + variance.toLocaleString(),
+      trend: (variance === 0 ? 'neutral' : variance > 0 ? 'up' : 'down') as 'up' | 'down' | 'neutral',
+      trendValue: Math.abs(variance).toLocaleString(),
       icon: <TrendingUp className="h-8 w-8" />,
     },
     {
       title: 'Akurasi',
-      value: summary.accuracy.toFixed(1) + '%',
-      trend: (summary.accuracy >= 99 ? 'up' : summary.accuracy >= 95 ? 'neutral' : 'down') as 'up' | 'down' | 'neutral',
+      value: accuracy.toFixed(1) + '%',
+      trend: (accuracy >= 99 ? 'up' : accuracy >= 95 ? 'neutral' : 'down') as 'up' | 'down' | 'neutral',
       icon: <ShieldCheck className="h-8 w-8" />,
     },
-    { title: 'Slot Kosong', value: summary.emptySlots.toLocaleString(), icon: <MinusCircle className="h-8 w-8" /> },
+    { title: 'Slot Kosong', value: emptySlots.toLocaleString(), icon: <MinusCircle className="h-8 w-8" /> },
   ];
 
   return (
@@ -163,7 +229,7 @@ export function DashboardView({ initialEntity }: DashboardViewProps) {
           )}
         </div>
         <div className="flex items-center gap-3">
-          {lastUpdated && (
+          {lastUpdated && typeof lastUpdated.toLocaleTimeString === 'function' && (
             <span className="inline-flex items-center gap-1 text-muted-foreground">
               <Clock className="h-3.5 w-3.5" />
               {lastUpdated.toLocaleTimeString('id-ID')}
@@ -187,12 +253,12 @@ export function DashboardView({ initialEntity }: DashboardViewProps) {
       </div>
 
       {/* Alerts */}
-      <AlertBanner expired={alerts.expired} expiring={alerts.expiring} outOfStock={alerts.outOfStock} />
+      <AlertBanner expired={alerts?.expired ?? []} expiring={alerts?.expiring ?? []} outOfStock={alerts?.outOfStock ?? []} />
 
       {/* Charts Row 1: Top SKU + Zone */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <TopSKUChart data={charts.topSkus} />
-        <ZoneChart data={charts.zoneDistribution} />
+        <TopSKUChart data={charts?.topSkus ?? []} />
+        <ZoneChart data={charts?.zoneDistribution ?? []} />
       </div>
 
       {/* Charts Row 2: FEFO Timeline + Accuracy Gauge + Variance */}
@@ -201,16 +267,16 @@ export function DashboardView({ initialEntity }: DashboardViewProps) {
           <FefoTimelineChart data={fefoData} />
         </div>
         <div className="flex flex-col gap-4">
-          <AccuracyGaugeChart accuracy={summary.accuracy} />
+          <AccuracyGaugeChart accuracy={accuracy} />
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-1">
           <VarianceBreakdownChart
-            systemQty={summary.totalSystemQty}
-            soh={summary.totalSOH}
-            variance={summary.variance}
+            systemQty={totalSystemQty}
+            soh={totalSOH}
+            variance={variance}
           />
         </div>
         <div className="lg:col-span-2">
@@ -220,12 +286,12 @@ export function DashboardView({ initialEntity }: DashboardViewProps) {
               <CardTitle className="text-sm font-semibold">Ringkasan Operasional</CardTitle>
             </CardHeader>
             <CardContent className="grid grid-cols-2 sm:grid-cols-3 gap-4 pt-2">
-              <SummaryTile label="Lot Expired" value={summary.expiredCount} tone="destructive" />
-              <SummaryTile label="Segera Expired (30 hr)" value={summary.expiringCount} tone="warning" />
-              <SummaryTile label="Stok Habis" value={summary.outOfStockCount} tone="muted" />
-              <SummaryTile label="Total SOH" value={summary.totalSOH} tone="success" />
-              <SummaryTile label="Qty Sistem" value={summary.totalSystemQty} tone="info" />
-              <SummaryTile label="Akurasi" value={`${summary.accuracy.toFixed(1)}%`} tone="success" />
+              <SummaryTile label="Lot Expired" value={num(summary?.expiredCount)} tone="destructive" />
+              <SummaryTile label="Segera Expired (30 hr)" value={num(summary?.expiringCount)} tone="warning" />
+              <SummaryTile label="Stok Habis" value={num(summary?.outOfStockCount)} tone="muted" />
+              <SummaryTile label="Total SOH" value={totalSOH} tone="success" />
+              <SummaryTile label="Qty Sistem" value={totalSystemQty} tone="info" />
+              <SummaryTile label="Akurasi" value={`${accuracy.toFixed(1)}%`} tone="success" />
             </CardContent>
           </Card>
         </div>

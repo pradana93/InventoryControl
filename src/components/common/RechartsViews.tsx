@@ -26,11 +26,12 @@ interface FefoItem {
 
 export function FefoTimelineChart({ data }: { data: FefoItem[] }) {
   // Sort by urgency: expired first, then expiring soon, then safe
-  const chartData = [...data]
+  const chartData = [...(data ?? [])]
+    .filter((item) => item && typeof item.qtySistem === 'number')
     .sort((a, b) => a.daysToExpiry - b.daysToExpiry)
     .slice(0, 15)
     .map((item) => ({
-      name: `${item.namaBarang.slice(0, 14)}.. (${item.nomorRak})`,
+      name: `${String(item.namaBarang ?? '-').slice(0, 14)}.. (${item.nomorRak})`,
       qty: item.qtySistem,
       days: item.daysToExpiry,
       expiredLabel: item.expiredLabel,

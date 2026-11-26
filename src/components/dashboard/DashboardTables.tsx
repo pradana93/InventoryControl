@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { StockTables } from '@/components/dashboard/StockTables';
 import { RefreshCw, Loader2, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { redirectToLoginIfUnauthorized } from '@/lib/client-auth';
 
 export function DashboardTables() {
   const [skuData, setSkuData] = useState<any[]>([]);
@@ -20,6 +21,7 @@ export function DashboardTables() {
         fetch('/api/sku?action=stock'),
         fetch('/api/rack?action=detail'),
       ]);
+      if (redirectToLoginIfUnauthorized(skuRes) || redirectToLoginIfUnauthorized(detailRes)) return;
       if (!skuRes.ok || !detailRes.ok) throw new Error('Gagal memuat data tabel');
       const [skuJson, detailJson] = await Promise.all([skuRes.json(), detailRes.json()]);
       setSkuData(skuJson);

@@ -19,6 +19,7 @@ import { Loader2, Plus, Trash2, ArrowLeft, Check, AlertCircle } from 'lucide-rea
 import Link from 'next/link';
 import { useEntity } from '@/hooks/useEntity';
 import { ENTITY_COLORS } from '@/lib/constants';
+import { redirectToLoginIfUnauthorized } from '@/lib/client-auth';
 
 interface RackOption {
   rack: string;
@@ -194,6 +195,7 @@ export default function InboundForm() {
       });
 
       const result = await res.json();
+      if (redirectToLoginIfUnauthorized(res)) return;
       if (!res.ok) {
         throw new Error(result.error || 'Gagal menyimpan transaksi inbound.');
       }

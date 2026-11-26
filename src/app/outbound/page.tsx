@@ -33,6 +33,7 @@ import {
 import * as pdfjsLib from 'pdfjs-dist';
 import { ENTITY_COLORS, PT_PATTERNS } from '@/lib/constants';
 import { useEntity } from '@/hooks/useEntity';
+import { redirectToLoginIfUnauthorized } from '@/lib/client-auth';
 import { Suspense } from 'react';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `/pdf.worker.min.mjs`;
@@ -326,6 +327,7 @@ function OutboundPageContent() {
         body: JSON.stringify({ lines: linesToAllocate, entitas: ent }),
       });
       
+      if (redirectToLoginIfUnauthorized(res)) return;
       if (!res.ok) throw new Error('Gagal alokasi');
       
       const data = await res.json();
@@ -379,6 +381,7 @@ function OutboundPageContent() {
       });
       
       const data = await res.json();
+      if (redirectToLoginIfUnauthorized(res)) return;
       if (!res.ok) throw new Error(data.error || 'Gagal konfirmasi');
       
       setConfirmed({

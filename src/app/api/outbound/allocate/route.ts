@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getLedger, getWarehouse, getCatalog, appendRow } from '@/lib/google-sheets';
+import { getLedger, getWarehouse, getCatalog } from '@/lib/google-sheets';
 
 export const dynamic = 'force-dynamic';
 

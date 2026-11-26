@@ -6,6 +6,7 @@ import { KPICard } from '@/components/common/KPICard';
 import { AlertBanner } from '@/components/common/AlertBanner';
 import { TopSKUChart, ZoneChart } from '@/components/common/Charts';
 import { StockTables } from '@/components/dashboard/StockTables';
+import { redirectToLoginIfUnauthorized } from '@/lib/client-auth';
 import { RefreshCw, Loader2, Package, TrendingUp, AlertTriangle, CheckCircle, MinusCircle, PackageX } from 'lucide-react';
 
 interface DashboardData {
@@ -42,6 +43,7 @@ export function DashboardContent() {
     setError(null);
     try {
       const res = await fetch('/api/dashboard');
+      if (redirectToLoginIfUnauthorized(res)) return;
       if (!res.ok) throw new Error('Gagal memuat data dashboard');
       const json = await res.json();
       setData(json);
