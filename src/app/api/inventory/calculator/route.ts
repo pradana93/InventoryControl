@@ -8,7 +8,8 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const entParam = searchParams.get('ent')?.toUpperCase();
-    const entity: 'BBB' | 'BBT' = (entParam === 'BBB' || entParam === 'BBT') ? entParam : 'BBB';
+    const validEntities = ['BBB', 'BBT', 'ALL'] as const;
+    const entity: 'BBB' | 'BBT' | 'ALL' = validEntities.includes(entParam as any) ? (entParam as 'BBB' | 'BBT' | 'ALL') : 'BBB';
 
     const [lots, catalog, ledger] = await Promise.all([
       getInventoryLots(),
