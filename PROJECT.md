@@ -5,7 +5,7 @@
 > next steps. Update this file whenever significant work lands, so context survives
 > across sessions.
 >
-> **Last updated:** 2026-11-25
+> **Last updated:** 2026-11-26
 
 ---
 
@@ -70,7 +70,7 @@ The system was **migrated from Google Apps Script (GAS)** to a full
 │   │   ├── layout.tsx                # Root layout + NavBar
 │   │   └── page.tsx                  # Dashboard (/)
 │   ├── components/
-│   │   ├── common/                   # NavBar, KPICard, AlertBanner, charts
+│   │   ├── common/                   # NavBar (collapsible sidebar), AppShell, KPICard, AlertBanner, charts
 │   │   ├── dashboard/                # Dashboard tables & metric views
 │   │   ├── inbound/                  # Inbound sub-components
 │   │   └── ui/                       # shadcn/ui primitives
@@ -261,6 +261,12 @@ Auto-deploys to the aliased production URL `inventory-control-five.vercel.app`.
       replaced all rows from `SKU Vittoria BBB & BBT.xlsx` (122 BBB + 30 BBT = 152 rows,
       21 overlapping names kept as distinct rows per entity).
 - [x] `/api/sku` supports `entitas=BBB|BBT` filtering and returns entity per SKU.
+- [x] **Collapsible Sidebar Navigation** (`src/components/common/NavBar.tsx`, `src/components/common/AppShell.tsx`):
+      Replaced top-level header navbar with a responsive, collapsible sidebar.
+      Features: desktop collapse/expand (w-72 ↔ w-20), mobile drawer with backdrop,
+      entity selector dropdown (BBB/BBT/ALL) with colored badges, user profile dropdown
+      with role badge and sign-out, tooltips on collapsed icons, smooth transitions.
+      All 6 routes (Dashboard, Inbound, Outbound, Opname, Labels, Users) verified working.
 
 ### 🔧 Known Issues / Follow-ups
 - [ ] Verify end-to-end outbound test after the `Picking_List` header reset

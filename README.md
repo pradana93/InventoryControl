@@ -12,6 +12,13 @@ A modern, high-performance warehouse inventory control system and inbound proces
 
 ## 🌟 Key Features
 
+### 📱 Modern Collapsible Sidebar Navigation
+- **Responsive Design**: Full sidebar (288px) on desktop, collapsible to icon-only (80px), mobile drawer with backdrop overlay.
+- **Entity Selector**: Quick-switch between BBB / BBT / ALL entities with color-coded badges.
+- **User Profile Dropdown**: Avatar, email, role badge (Super Admin / Manager / Operator), and sign-out.
+- **Tooltips**: Hover tooltips on collapsed icons for full label visibility.
+- **Smooth Transitions**: 300ms CSS transitions for all state changes.
+
 ### 📊 Real-Time Inventory Control Dashboard (`/`)
 - **Executive KPIs**: Real-time overview of Total SKU, Total System Stock, SOH (Stock On Hand), Variance, Inventory Accuracy %, and Empty Rack Slots.
 - **Critical Expiry & OOS Alerts**:
