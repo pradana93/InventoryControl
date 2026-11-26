@@ -9,10 +9,6 @@ export async function proxy(request: NextRequest) {
   const isPublic = pathname === '/login' || 
                     pathname.startsWith('/api/auth') || 
                     pathname.startsWith('/api/health') ||
-                    pathname.startsWith('/api/env-check') ||
-                    pathname.startsWith('/api/fix-password') ||
-                    pathname.startsWith('/api/auth-debug') ||
-                    pathname.startsWith('/api/auth-debug-callback') ||
                     pathname.startsWith('/api/rack/scan') ||
                     pathname.startsWith('/api/inbound/scan') ||
                     pathname.startsWith('/api/sku') ||
