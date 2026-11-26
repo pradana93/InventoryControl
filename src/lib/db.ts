@@ -476,7 +476,7 @@ export async function getStockOpname(): Promise<StockOpnameEntry[]> {
     qtyFisikSOH: _num(r.qty_fisik_soh),
     variance: _num(r.variance),
     selisihRp: _num(r.selisih_rp),
-    toleranceStatus: _str(r.tolerance_status) || 'Akurat',
+    toleranceStatus: (_str(r.tolerance_status) || 'Akurat') as 'Akurat' | 'Toleransi' | 'Selisih',
     akurasi: `${_num(r.akurasi_pct).toFixed(2)}%`,
     tanggalOpname: toDateOnly(r.tanggal_opname),
     petugas: _str(r.petugas),

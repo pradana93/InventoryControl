@@ -54,7 +54,7 @@ export async function GET(request: Request) {
               qtyFisikSOH: l.soh,
               variance: variance,
               selisihRp: selisihRp,
-              toleranceStatus: toleranceStatus,
+              toleranceStatus: toleranceStatus as 'Akurat' | 'Toleransi' | 'Selisih',
               akurasi: `${l.akurasi.toFixed(2)}%`,
               tanggalOpname: l.tanggalInbound, // Using inbound date for simplicity, can be updated later
               petugas: '', // Will be populated from stock_opname table during actual save
