@@ -77,6 +77,7 @@ export function NavBar() {
     { href: '/outbound', icon: Package, label: 'Picking List Generator', roles: ['super-admin', 'manager'] },
     { href: '/opname', icon: ClipboardCheck, label: 'Stock Opname', roles: ['super-admin', 'manager', 'operator'] },
     { href: '/labels', icon: QrCode, label: 'Label Rak', roles: ['super-admin', 'manager'] },
+    { href: '/calculator-settings', icon: ShieldAlert, label: 'Pengaturan Kalkulator', roles: ['super-admin', 'manager'] },
     { href: '/users', icon: Users, label: 'Pengguna', roles: ['super-admin'] },
   ].filter((item) => !role || item.roles.includes(role));
 
