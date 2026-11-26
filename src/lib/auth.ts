@@ -55,7 +55,7 @@ export const authOptions: any = {
       return token;
     },
     async signIn({ user, account }: any) {
-      // Google OAuth: only allow existing users in the Users sheet
+      // Google OAuth: only allow existing users in the users table
       if (account?.provider === 'google') {
         const { getUsers } = await import('@/lib/user-service');
         const users = await getUsers();
@@ -66,28 +66,34 @@ export const authOptions: any = {
       return true;
     },
   },
-  pages: {
-    signIn: '/login',
-    error: '/login',
-  },
   session: {
     strategy: 'jwt',
     maxAge: 30 * 24 * 60 * 60,
   },
   secret: process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET,
   trustHost: true,
+  useSecureCookies: process.env.NODE_ENV === 'production',
   cookies: {
-    sessionToken: {
-      name: process.env.NODE_ENV === 'production' ? '__Secure-authjs.session-token' : 'authjs.session-token',
+    csrfToken: {
+      name: '__Secure-authjs.csrf-token',
       options: {
         httpOnly: true,
         sameSite: 'lax',
         path: '/',
-        secure: process.env.NODE_ENV === 'production',
+        secure: true,
       },
     },
-    csrfToken: {
-      name: '__Host-authjs.csrf-token',
+    sessionToken: {
+      name: '__Secure-authjs.session-token',
+      options: {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: true,
+      },
+    },
+    callbackUrl: {
+      name: '__Secure-authjs.callback-url',
       options: {
         httpOnly: true,
         sameSite: 'lax',
