@@ -11,6 +11,7 @@ interface KPICardProps {
   trend?: 'up' | 'down' | 'neutral';
   trendValue?: string;
   className?: string;
+  action?: React.ReactNode;
 }
 
 export function KPICard({ 
@@ -20,7 +21,8 @@ export function KPICard({
   icon, 
   trend, 
   trendValue, 
-  className 
+  className,
+  action
 }: KPICardProps) {
   return (
     <Card className={cn('relative overflow-hidden transition-shadow hover:shadow-md', className)}>
@@ -44,6 +46,11 @@ export function KPICard({
             </div>
             {subtitle && (
               <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>
+            )}
+            {action && (
+              <div className="mt-3 pt-3 border-t border-border/50">
+                {action}
+              </div>
             )}
           </div>
           {icon && (

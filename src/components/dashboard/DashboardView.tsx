@@ -297,6 +297,15 @@ export function DashboardView({ initialEntity }: DashboardViewProps) {
           value={kritisCount.toLocaleString()}
           icon={<AlertTriangle className="h-8 w-8" color="#dc2626" />}
           className="bg-destructive/10"
+          action={
+            <Link
+              href="/replenishment"
+              className="text-xs text-destructive hover:underline flex items-center gap-1"
+            >
+              <ExternalLink className="h-3 w-3" />
+              Lihat Pusat Tindakan
+            </Link>
+          }
         />
         <KPICard
           title="Barang AMAN"
@@ -340,11 +349,12 @@ export function DashboardView({ initialEntity }: DashboardViewProps) {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-1/5">SKU Name</TableHead>
-                  <TableHead className="w-1/5">Entitas</TableHead>
-                  <TableHead className="w-1/5 text-right">DOI (Hari)</TableHead>
-                  <TableHead className="w-1/5 text-right">Coverage (Hari)</TableHead>
-                  <TableHead className="w-1/5 text-center">Opname</TableHead>
+                  <TableHead className="w-2/7">SKU Name</TableHead>
+                  <TableHead className="w-1/7">Entitas</TableHead>
+                  <TableHead className="w-1/7 text-right">DOI (Hari)</TableHead>
+                  <TableHead className="w-1/7 text-right">Coverage (Hari)</TableHead>
+                  <TableHead className="w-1/7 text-center">Opname</TableHead>
+                  <TableHead className="w-1/7 text-center">Pusat Tindakan</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -357,9 +367,17 @@ export function DashboardView({ initialEntity }: DashboardViewProps) {
                     <TableCell className="text-center">
                       <Link
                         href={`/opname?search=${item.skuName}`}
-                        className="text-blue-500 hover:underline"
+                        className="text-blue-500 hover:underline text-sm"
                       >
                         Opname
+                      </Link>
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Link
+                        href={`/replenishment?search=${item.skuName}`}
+                        className="text-destructive hover:underline text-sm font-medium"
+                      >
+                        Lihat
                       </Link>
                     </TableCell>
                   </TableRow>
