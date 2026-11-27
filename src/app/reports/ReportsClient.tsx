@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { useEntity } from '@/hooks/useEntity';
 import type { CatalogEntry, InventoryLot, LedgerEntry } from '@/lib/db';
+import { filterActiveSkus } from '@/lib/warehouse-optimization';
 
 // ============================================================================
 // TYPES
@@ -320,13 +321,38 @@ export function ReportsPageContent() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/inventory/report?ent=${entity}`);
-      if (!res.ok) throw new Error('Gagal memuat laporan inventori');
-      const json: ReportData = await res.json();
+      const [reportRes, catalogRes] = await Promise.all([
+        fetch(`/api/inventory/report?ent=${entity}`),
+        fetch(`/api/sku?action=list`),
+      ]);
+      if (!reportRes.ok) throw new Error('Gagal memuat laporan inventori');
+      const json: ReportData = await reportRes.json();
+
+      // Build the set of active SKU names (missing activeFlag = active) so
+      // inactive/archived SKUs never surface in the reports, even if the
+      // report API has not been filtered yet.
+      const catalogEntries: CatalogEntry[] = catalogRes.ok ? await catalogRes.json() : [];
+      const activeNames = new Set(
+        filterActiveSkus(catalogEntries).map((c) => c.namaBarang.toLowerCase())
+      );
+      const isActiveName = (skuName: string) =>
+        activeNames.size === 0 || activeNames.has(skuName.toLowerCase());
+
       setData({
-        valuation: json.valuation || [],
-        slowMoving: json.slowMoving || [],
-        velocity: json.velocity || [],
+        valuation: (json.valuation || [])
+          .map((group) => {
+            const skus = group.skus.filter((s) => isActiveName(s.skuName));
+            return {
+              ...group,
+              skus,
+              skuCount: skus.length,
+              totalQty: skus.reduce((sum, s) => sum + s.currentStock, 0),
+              totalValue: skus.reduce((sum, s) => sum + s.inventoryValue, 0),
+            };
+          })
+          .filter((group) => group.skus.length > 0),
+        slowMoving: (json.slowMoving || []).filter((item) => isActiveName(item.skuName)),
+        velocity: (json.velocity || []).filter((item) => isActiveName(item.skuName)),
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Terjadi kesalahan');

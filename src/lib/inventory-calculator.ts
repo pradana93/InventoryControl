@@ -22,6 +22,7 @@ export interface CalculatorResult {
   forecastPerDay: number;
   forecastStatus: 'OK' | 'LOW_DATA';
   forecastMethod: string; // e.g. 'WMA-5m'
+  activeFlag?: boolean;
 }
 
 export interface CalculatorInput {
@@ -146,6 +147,7 @@ export function calculateInventoryMetrics(input: CalculatorInput): CalculatorRes
       forecastPerDay,
       forecastStatus,
       forecastMethod,
+      activeFlag: catalogEntry.activeFlag ?? true,
     });
   }
 

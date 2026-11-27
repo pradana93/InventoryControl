@@ -20,6 +20,10 @@ export async function GET(request: Request) {
 
         // Map catalog unit cost by lowercase SKU name
         const costMap = new Map(catalog.map(c => [c.namaBarang.toLowerCase(), c.unitCost]));
+        // Map catalog activeFlag by lowercase SKU name (missing = active)
+        const activeMap = new Map(
+          catalog.map(c => [c.namaBarang.toLowerCase(), c.activeFlag ?? true])
+        );
 
         // Filter inventory lots by entity
         const entityWarehouse = entity && entity !== 'ALL'
@@ -29,6 +33,8 @@ export async function GET(request: Request) {
 
         const filteredAndMapped = inventoryLots
           .filter(l => entityRackIds.has(l.nomorRak))
+          // Exclude inactive SKUs from the opname work list.
+          .filter(l => activeMap.get(l.namaBarang.toLowerCase()) ?? true)
           .map(l => {
             const unitCost = costMap.get(l.namaBarang.toLowerCase()) || 0;
             const variance = l.soh - l.qtySistem; // already calculated by getInventoryLots

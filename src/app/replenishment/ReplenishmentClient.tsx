@@ -11,6 +11,7 @@ import { Loader2, AlertCircle, Download, ArrowUpDown } from 'lucide-react';
 import { useEntity } from '@/hooks/useEntity';
 import * as XLSX from 'xlsx';
 import { CalculatorResult } from '@/lib/inventory-calculator';
+import { filterActiveSkus } from '@/lib/warehouse-optimization';
 
 export interface ReplenishmentItem extends CalculatorResult {
   priority: 'URGENT' | 'HIGH' | 'NORMAL';
@@ -72,7 +73,7 @@ export function ReplenishmentPageContent() {
       const res = await fetch(`/api/inventory/calculator?ent=${entParam}`);
       if (!res.ok) throw new Error('Gagal memuat data kalkulator');
       const data: CalculatorResult[] = await res.json();
-      setItems(filterReplenishmentItems(data));
+      setItems(filterReplenishmentItems(filterActiveSkus(data)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Terjadi kesalahan');
     } finally {

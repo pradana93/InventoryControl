@@ -6,6 +6,7 @@ import {
   SkuLifecycleItem,
 } from '@/lib/slotting';
 import { auth } from '@/lib/auth';
+import { filterActiveSkusByEntity } from '@/lib/warehouse-optimization';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,14 +41,12 @@ export async function GET(request: Request) {
     ]);
 
     // Active SKUs only, scoped to the requested entity.
-    const activeSkus: SkuLifecycleItem[] = catalog
-      .filter((c) => c.activeFlag === true)
-      .filter((c) => entity === 'ALL' || c.entitas === entity)
+    const activeSkus: SkuLifecycleItem[] = filterActiveSkusByEntity(catalog, entity)
       .map((c) => ({
         skuId: c.skuId,
         namaBarang: c.namaBarang,
         entitas: c.entitas as 'BBB' | 'BBT',
-        activeFlag: c.activeFlag === true,
+        activeFlag: c.activeFlag ?? true,
         currentStock: 0,
         inventoryValue: 0,
         status: 'Aktif',

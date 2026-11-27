@@ -34,6 +34,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { ENTITY_COLORS, PT_PATTERNS } from '@/lib/constants';
 import { useEntity } from '@/hooks/useEntity';
 import { redirectToLoginIfUnauthorized } from '@/lib/client-auth';
+import { filterActiveSkus } from '@/lib/warehouse-optimization';
 import { Suspense } from 'react';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `/pdf.worker.min.mjs`;
@@ -243,7 +244,9 @@ function OutboundPageContent() {
 
       const ent = entity === 'ALL' ? detected || 'BBB' : entity;
       const catalogRes = await fetch(`/api/sku?action=names${ent ? `&ent=${ent}` : ''}`);
-      const catalog = catalogRes.ok ? await catalogRes.json() : [];
+      const rawCatalog = catalogRes.ok ? await catalogRes.json() : [];
+      // Exclude inactive/archived SKUs from outbound matching — they cannot be picked.
+      const catalog = filterActiveSkus(rawCatalog);
 
       const startIdx = cells.findIndex(c => c.toLowerCase().includes('kuantitas') || c.toLowerCase().includes('pck'));
       const tableCells = startIdx !== -1 ? cells.slice(startIdx + 1) : cells;

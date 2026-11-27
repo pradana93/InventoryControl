@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getInventoryLots, getCatalog, getLedger } from '@/lib/db';
 import { calculateInventoryMetrics } from '@/lib/inventory-calculator';
+import { filterActiveSkus } from '@/lib/warehouse-optimization';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +25,10 @@ export async function GET(request: Request) {
       entity,
     });
 
-    return NextResponse.json(results);
+    // Filter out inactive SKUs
+    const filteredResults = filterActiveSkus(results);
+
+    return NextResponse.json(filteredResults);
   } catch (error) {
     console.error('Inventory Calculator API error:', error);
     return NextResponse.json({ error: 'Gagal menghitung metrik inventori' }, { status: 500 });

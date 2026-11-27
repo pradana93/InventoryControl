@@ -56,6 +56,7 @@ export async function GET(request: Request) {
         namaBarang: c.namaBarang,
         entitas: c.entitas,
         satuan: c.satuan,
+        activeFlag: c.activeFlag ?? true,
       }));
       return NextResponse.json(skus);
     }

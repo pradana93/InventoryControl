@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { useEntity } from '@/hooks/useEntity';
 import { ENTITY_COLORS, Entity } from '@/lib/constants';
+import { filterActiveSkus } from '@/lib/warehouse-optimization';
 
 interface CalculatorResult {
   skuName: string;
@@ -47,6 +48,7 @@ interface CalculatorResult {
   forecastPerDay: number;
   forecastStatus: 'OK' | 'LOW_DATA';
   forecastMethod: string;
+  activeFlag?: boolean;
 }
 
 type SortKey = keyof Pick<
@@ -128,7 +130,7 @@ function InventoryCalculatorPageContent() {
       const res = await fetch(`/api/inventory/calculator?ent=${ent}`);
       if (!res.ok) throw new Error('Gagal memuat data kalkulator');
       const json: CalculatorResult[] = await res.json();
-      setData(Array.isArray(json) ? json : []);
+      setData(Array.isArray(json) ? filterActiveSkus(json) : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Terjadi kesalahan');
     } finally {

@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Loader2, Save, RefreshCw, CheckCircle2, Globe, AlertTriangle, Target, TrendingUp, Search } from 'lucide-react';
 import { useEntity } from '@/hooks/useEntity';
 import { ENTITY_COLORS } from '@/lib/constants';
+import { filterActiveSkus } from '@/lib/warehouse-optimization';
 import { useSession } from 'next-auth/react';
 
 type ToleranceStatus = 'Akurat' | 'Toleransi' | 'Selisih';
@@ -63,8 +64,28 @@ function StockOpnamePageContent() {
     setLoading(true);
     try {
       const ent = entity === 'ALL' ? '' : entity;
-      const res = await fetch(`/api/stock-opname?action=list${ent ? `&ent=${ent}` : ''}`);
-      if (res.ok) setData(await res.json());
+      const [res, catalogRes] = await Promise.all([
+        fetch(`/api/stock-opname?action=list${ent ? `&ent=${ent}` : ''}`),
+        fetch('/api/sku?action=list'),
+      ]);
+      if (res.ok) {
+        const rows: OpnameRow[] = await res.json();
+
+        // Cross-reference with the catalog's activeFlag so inactive/archived
+        // SKUs never appear in the opname work list. Missing flag = active.
+        const catalogEntries = catalogRes.ok ? await catalogRes.json() : [];
+        const activeNames = new Set(
+          filterActiveSkus(catalogEntries)
+            .map((c: any) => c.namaBarang?.toLowerCase())
+            .filter(Boolean)
+        );
+        const activeRows =
+          activeNames.size === 0
+            ? rows
+            : rows.filter((r) => activeNames.has(r.skuName.toLowerCase()));
+
+        setData(activeRows);
+      }
     } catch (e) {
       console.error('Failed to load', e);
     } finally {

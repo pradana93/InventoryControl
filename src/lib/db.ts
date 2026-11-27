@@ -1,5 +1,6 @@
 import { supabaseAdmin } from './supabase';
 import { calculateInventoryMetrics, CalculatorResult } from './inventory-calculator';
+import { filterActiveSkus } from './warehouse-optimization';
 
 // ============================================================================
 // SUPABASE DATA LAYER
@@ -662,12 +663,13 @@ function calculateFEFOStatus(daysToExpiry: number, qtySistem: number): string {
 }
 
 export async function getInventoryLots(): Promise<InventoryLot[]> {
-  const [ledger, catalog, warehouse, opname] = await Promise.all([
+  const [ledger, allCatalog, warehouse, opname] = await Promise.all([
     getLedger(),
     getCatalog(),
     getWarehouse(),
     getStockOpname(),
   ]);
+  const catalog = filterActiveSkus(allCatalog);
 
   const catalogByName = new Map(catalog.map((c) => [c.namaBarang.toLowerCase(), c]));
   const warehouseByRack = new Map(warehouse.map((w) => [w.rackId, w]));

@@ -8,6 +8,7 @@ import {
   LedgerEntry,
   EntityFilter,
 } from '@/lib/db';
+import { filterActiveSkus } from '@/lib/warehouse-optimization';
 
 export const dynamic = 'force-dynamic';
 
@@ -294,9 +295,14 @@ export async function GET(request: Request) {
     const filteredLedger =
       entity === 'ALL' ? ledger : ledger.filter((e) => e.entitas === entity);
 
-    const valuation = computeValuation(filteredLots, filteredCatalog);
-    const slowMoving = computeSlowMoving(filteredLots, filteredCatalog, filteredLedger);
-    const velocity = computeVelocity(filteredLots, filteredCatalog, filteredLedger);
+    // Filter out inactive SKUs
+    const activeCatalog = filterActiveSkus(filteredCatalog);
+    const activeSkuNames = new Set(activeCatalog.map(c => c.namaBarang.toLowerCase()));
+    const activeLots = filteredLots.filter(lot => activeSkuNames.has(lot.namaBarang.toLowerCase()));
+
+    const valuation = computeValuation(activeLots, activeCatalog);
+    const slowMoving = computeSlowMoving(activeLots, activeCatalog, filteredLedger);
+    const velocity = computeVelocity(activeLots, activeCatalog, filteredLedger);
 
     return NextResponse.json({ valuation, slowMoving, velocity });
   } catch (error) {
