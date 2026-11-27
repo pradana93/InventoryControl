@@ -108,7 +108,7 @@ export function SkuLifecyclePageContent() {
   };
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
       <div className="flex justify-between">
         <h1 className="text-2xl font-bold">Manajemen Siklus SKU</h1>
         {canEdit && (

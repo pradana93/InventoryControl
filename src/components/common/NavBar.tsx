@@ -40,6 +40,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useState, useRef, useEffect } from 'react';
 import { useEntity } from '@/hooks/useEntity';
+import { useSidebar } from '@/components/common/SidebarContext';
 import { ENTITY_OPTIONS, ENTITY_COLORS } from '@/lib/constants';
 
 const ROLE_LABELS: Record<string, string> = {
@@ -135,7 +136,7 @@ export function NavBar() {
   const { entity, setEntity, options } = useEntity();
   
   // Sidebar state
-  const [collapsed, setCollapsed] = useState(false);
+  const { collapsed, toggleCollapsed } = useSidebar();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [entityMenuOpen, setEntityMenuOpen] = useState(false);
@@ -266,7 +267,7 @@ export function NavBar() {
 
           {/* Collapse Toggle (Desktop only) */}
           <button
-            onClick={() => setCollapsed(!collapsed)}
+            onClick={toggleCollapsed}
             className="hidden lg:flex items-center justify-center h-8 w-8 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
             title={collapsed ? 'Perluas Sidebar' : 'Ciutkan Sidebar'}
           >
@@ -349,35 +350,17 @@ export function NavBar() {
         </div>
 
         {/* Navigation Sections */}
-        <div className="flex-1 overflow-y-auto px-3 py-4 space-y-2">
-          {filteredSections.map((section) => {
-            const sectionOpen = openSections[section.key];
-            const active = isSectionActive(section);
-
-            return (
-              <div key={section.key} className="space-y-1">
-                {!collapsed && (
-                  <button
-                    onClick={() => toggleSection(section.key)}
-                    className={cn(
-                      'w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors hover:bg-muted/50',
-                      'text-muted-foreground'
-                    )}
-                    style={{ paddingLeft: '0.75rem' }}
-                  >
-                    <section.icon className={cn('h-4 w-4 flex-shrink-0', sectionOpen ? '' : 'rotate-0')} />
-                    <span className="flex-1 truncate">{section.label}</span>
-                    {!sectionOpen && <ChevronDown className="h-4 w-4 transition-transform rotate-90 text-muted-foreground" />}
-                    {sectionOpen && <ChevronDown className="h-4 w-4 transition-transform rotate-180 text-muted-foreground" />}
-                    {active && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
-                  </button>
-                )}
-
-                {/* Section Items - always visible in collapsed mode, conditionally in expanded */}
+        <div className={cn('flex-1 px-3 py-4 space-y-2', !collapsed && 'overflow-y-auto')}>
+          {collapsed ? (
+            // COLLAPSED MODE: Flat icon list with subtle group dividers. No scroll
+            // wrapper — the compact 12 icons fit a standard viewport.
+            <div className="space-y-1">
+              {filteredSections.map((section, sectionIndex) => (
                 <div
+                  key={section.key}
                   className={cn(
-                    'overflow-hidden transition-all duration-200 ease-in-out',
-                    !collapsed && !sectionOpen ? 'max-h-0 opacity-0' : 'max-h-96 opacity-100'
+                    'space-y-1',
+                    sectionIndex > 0 && 'pt-2 mt-1 border-t border-border/60'
                   )}
                 >
                   {section.items.map((item) => {
@@ -386,37 +369,83 @@ export function NavBar() {
                       <Link
                         key={item.href}
                         href={item.href}
-                        title={collapsed ? item.label : undefined}
+                        title={item.label}
                         className={cn(
-                          'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all group relative ml-1',
+                          'flex justify-center py-2.5 rounded-xl text-sm font-medium transition-all group relative',
                           isActive
-                            ? 'bg-primary text-primary-foreground shadow-md font-semibold'
+                            ? 'bg-primary text-primary-foreground shadow-md'
                             : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                         )}
                       >
                         <item.icon className={cn('h-5 w-5 flex-shrink-0 transition-transform group-hover:scale-110', isActive ? 'text-primary-foreground' : 'text-muted-foreground group-hover:text-foreground')} />
-                        {!collapsed && (
-                          <span className="truncate flex-1">{item.label}</span>
-                        )}
-                        {!collapsed && item.badge && (
-                          <span className="ml-auto px-1.5 py-0.5 text-[9px] font-bold rounded bg-primary/20 text-primary border border-primary/30">
-                            {item.badge}
-                          </span>
-                        )}
-
                         {/* Tooltip for collapsed mode */}
-                        {collapsed && (
-                          <div className="absolute left-full ml-3 px-3 py-1.5 bg-popover text-popover-foreground text-xs font-medium rounded-lg shadow-md border border-border whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50">
-                            {section.collapsedLabel} › {item.label}
-                          </div>
-                        )}
+                        <div className="absolute left-full ml-3 px-3 py-1.5 bg-popover text-popover-foreground text-xs font-medium rounded-lg shadow-md border border-border whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50">
+                          {section.collapsedLabel} › {item.label}
+                        </div>
                       </Link>
                     );
                   })}
                 </div>
-              </div>
-            );
-          })}
+              ))}
+            </div>
+          ) : (
+            // EXPANDED MODE: Grouped sections with collapsible headers
+            filteredSections.map((section) => {
+              const sectionOpen = openSections[section.key];
+              const active = isSectionActive(section);
+
+              return (
+                <div key={section.key} className="space-y-1">
+                  <button
+                    onClick={() => toggleSection(section.key)}
+                    className={cn(
+                      'w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors hover:bg-muted/50',
+                      'text-muted-foreground'
+                    )}
+                    style={{ paddingLeft: '0.75rem' }}
+                  >
+                    <section.icon className={cn('h-4 w-4 flex-shrink-0')} />
+                    <span className="flex-1 truncate">{section.label}</span>
+                    {!sectionOpen && <ChevronDown className="h-4 w-4 transition-transform rotate-90 text-muted-foreground" />}
+                    {sectionOpen && <ChevronDown className="h-4 w-4 transition-transform rotate-180 text-muted-foreground" />}
+                    {active && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
+                  </button>
+
+                  {/* Section Items - collapsible in expanded mode */}
+                  <div
+                    className={cn(
+                      'overflow-hidden transition-all duration-200 ease-in-out ml-1',
+                      !sectionOpen ? 'max-h-0 opacity-0' : 'max-h-96 opacity-100'
+                    )}
+                  >
+                    {section.items.map((item) => {
+                      const isActive = pathname === item.href;
+                      return (
+                        <Link
+                          key={item.href}
+                          href={item.href}
+                          className={cn(
+                            'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all group relative',
+                            isActive
+                              ? 'bg-primary text-primary-foreground shadow-md font-semibold'
+                              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                          )}
+                        >
+                          <item.icon className={cn('h-5 w-5 flex-shrink-0 transition-transform group-hover:scale-110', isActive ? 'text-primary-foreground' : 'text-muted-foreground group-hover:text-foreground')} />
+                          <span className="truncate flex-1">{item.label}</span>
+                          {item.badge && (
+                            <span className="ml-auto px-1.5 py-0.5 text-[9px] font-bold rounded bg-primary/20 text-primary border border-primary/30">
+                              {item.badge}
+                            </span>
+                          )}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
 
         {/* User Profile & Footer */}

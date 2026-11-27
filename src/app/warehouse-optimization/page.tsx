@@ -17,7 +17,7 @@ const SlottingClient = dynamic(
 
 export default function WarehouseOptimizationPage() {
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="p-6 max-w-[1600px] mx-auto">
       <h1 className="text-3xl font-bold mb-6">Optimalisasi Gudang</h1>
       <Tabs defaultValue="sku-lifecycle">
         <TabsList>

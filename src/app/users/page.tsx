@@ -188,7 +188,7 @@ export default function UsersPage() {
   // Don't render anything until session is loaded
   if (status === 'loading') {
     return (
-      <div className="p-6 max-w-6xl mx-auto">
+      <div className="p-6 max-w-[1600px] mx-auto">
         <div className="flex justify-center items-center h-64">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
@@ -202,7 +202,7 @@ export default function UsersPage() {
   }
 
   return (
-    <div className="p-6 space-y-6 max-w-6xl mx-auto">
+    <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
       {/* Toasts */}
       <div className="fixed top-6 right-6 z-50 flex flex-col gap-2 pointer-events-none">
         {toasts.map((t) => (

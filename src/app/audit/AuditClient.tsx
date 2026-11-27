@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { EmptyState } from '@/components/common/EmptyState';
 import {
   Loader2,
   AlertCircle,
@@ -392,7 +393,7 @@ export function AuditPageContent() {
   }
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
@@ -480,12 +481,11 @@ export function AuditPageContent() {
               </div>
 
               {filteredLogs.length === 0 ? (
-                <div className="text-center py-12 text-muted-foreground">
-                  <div className="mx-auto mb-4 opacity-50 flex justify-center">
-                    <ScrollText className="h-12 w-12" />
-                  </div>
-                  <p className="text-lg">Tidak ada log audit</p>
-                </div>
+                <EmptyState
+                  title="Tidak ada log audit"
+                  description="Belum ada aktivitas yang tercatat untuk filter ini. Log akan muncul setelah ada perubahan data."
+                  icon={ScrollText}
+                />
               ) : (
                 <div className="overflow-x-auto">
                   <Table>
@@ -570,12 +570,11 @@ export function AuditPageContent() {
             </CardHeader>
             <CardContent className="p-4 space-y-4">
               {!reconciliation ? (
-                <div className="text-center py-12 text-muted-foreground">
-                  <div className="mx-auto mb-4 opacity-50 flex justify-center">
-                    <Scale className="h-12 w-12" />
-                  </div>
-                  <p className="text-lg">Tidak ada data rekonsiliasi</p>
-                </div>
+                <EmptyState
+                  title="Tidak ada data rekonsiliasi"
+                  description="Data persediaan atau ledger belum tersedia untuk dihitung."
+                  icon={Scale}
+                />
               ) : (
                 <>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

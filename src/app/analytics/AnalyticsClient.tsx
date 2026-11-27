@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { EmptyState } from '@/components/common/EmptyState';
 import {
   Loader2,
   AlertCircle,
@@ -18,6 +19,7 @@ import {
   Warehouse,
   RefreshCw,
   Search,
+  PackageSearch,
 } from 'lucide-react';
 import { useEntity } from '@/hooks/useEntity';
 import type { AnalyticsResult, AnalyticsItem, AbcClass } from '@/lib/analytics';
@@ -224,7 +226,7 @@ export function AnalyticsPageContent() {
   const summary = data?.summary;
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
@@ -347,12 +349,11 @@ export function AnalyticsPageContent() {
           </div>
 
           {filteredItems.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              <div className="mx-auto mb-4 opacity-50 flex justify-center">
-                <TrendingUp className="h-12 w-12" />
-              </div>
-              <p className="text-lg">Tidak ada data analisis</p>
-            </div>
+            <EmptyState
+              title="Tidak ada data analisis"
+              description="Belum ada data persediaan atau aktivitas outbound yang cocok dengan kriteria pencarian Anda."
+              icon={PackageSearch}
+            />
           ) : (
             <div className="overflow-x-auto">
               <Table>

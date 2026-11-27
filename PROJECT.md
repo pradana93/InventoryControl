@@ -315,6 +315,55 @@ Auto-deploys to the aliased production URL `inventory-control-five.vercel.app`.
       - [x] **Production Deployment**: Project migrated to new Vercel account (`ai-468b`)
             live at `https://inventory-control-six-mu.vercel.app`.
 
+- [x] **Phase 2 — Inventory Calculator & Auto ROP** (plan:
+      `docs/superpowers/plans/2026-11-27-inventory-calculator-auto-rop.md`):
+      - [x] **Schema**: `catalog.lead_time_days`, `catalog.safety_stock_days`
+            (`supabase/migrations/20261127000000_calculator_params.sql`).
+      - [x] **Core library** `src/lib/inventory-calculator.ts`: DOI, ROP, Safety Stock, Coverage.
+      - [x] **API** `/api/inventory/calculator` (supports `BBB`/`BBT`/`ALL`).
+      - [x] **Dashboard** calculator alerts + `KRITIS` summaries.
+      - [x] **Admin settings** `/calculator-settings` for Lead Time & Safety Stock per SKU.
+      - [x] **Demand forecasting** `src/lib/forecast.ts` (Weighted Moving Average, WMA-5m).
+      - [x] **Full calculator screen** `/calculator` with Excel export.
+      - [x] **Fix**: allow `ALL` entity filter; wrap calculator pages in `<Suspense>` for static build.
+
+- [x] **Phase 3 — Replenishment Action Center & Inventory Reporting** (plan:
+      `docs/superpowers/plans/2026-11-27-replenishment-action-center-reporting.md`):
+      - [x] `/replenishment` — SKUs below ROP or `KRITIS`, grouped by entity, priority badges
+            (`URGENT`/`HIGH`/`NORMAL`), Excel export.
+      - [x] `/reports` — three tabs: **Valuasi Stok**, **Slow Moving / Dead Stock**,
+            **Distribusi & Velocity**, each with Excel export.
+      - [x] Dashboard quick links from `KRITIS` cards to `/replenishment`.
+      - [x] `next/dynamic` + `ssr: false` + `<Suspense>` pattern for static export.
+
+- [x] **Phase 4 — SKU Lifecycle & Intelligent Slotting** (plan:
+      `docs/superpowers/plans/2026-11-27-warehouse-optimization-sku-lifecycle-and-slotting.md`):
+      - [x] **Schema**: `catalog.activeFlag` boolean default `true`
+            (`supabase/migrations/20261128000000_add_active_flag_to_catalog.sql`).
+      - [x] `/warehouse-optimization` — Tab 1 **SKU Lifecycle Manager** (activate/deactivate/archive,
+            bulk actions, inactive/archived-with-stock badges); Tab 2 **Slotting Optimizer**
+            (ABC classification on active SKUs, zone recommendations, priority scores, move-list export).
+      - [x] **Cross-page propagation**: shared `filterActiveSkus()` in `src/lib/warehouse-optimization.ts`
+            hides inactive SKUs from Calculator, Replenishment, Reports, Opname, and Picking List.
+      - [x] **Fix**: Next.js 16 `params` Promise in `/api/catalog/[skuId]/active/route.ts`.
+
+- [x] **Phase 5 — Advanced Analytics & Audit Trails** (plan:
+      `docs/superpowers/plans/2026-11-28-advanced-analytics-audit-compliance.md`):
+      - [x] **Schema**: immutable `audit_logs` table (append-only, UPDATE/DELETE restricted)
+            (`supabase/migrations/20261129000000_audit_logs.sql`).
+      - [x] **Audit helper** `src/lib/audit.ts`: `logAuditAction()`, `getAuditLogs()`.
+      - [x] **Forecasting engine** `src/lib/forecasting.ts`: Exponential Smoothing (SES, α=0.3)
+            and Days of Supply (`calculateDaysOfSupply`).
+      - [x] **Analytics library** `src/lib/analytics.ts`: `computeAnalytics()`, `classifyAbc()`,
+            `filterAnalyticsItems()`; inventory turnover, carrying cost (20%/yr), ABC class.
+      - [x] **`/analytics`** — KPI cards (nilai persediaan, biaya simpan, turnover, DOI/DOS),
+            per-SKU table, ABC filter, search, Excel export.
+      - [x] **`/audit`** — two tabs: **Log Audit** (filterable viewer + export) and
+            **Rekonsiliasi SOX** (book value vs physical value, variance %, >1% flag).
+      - [x] **APIs**: `/api/analytics`, `/api/audit`, `/api/compliance/sox`.
+      - [x] **NavBar**: `Analisis Lanjutan` (TrendingUp) and `Audit & Kepatuhan` (ShieldCheck),
+            roles `super-admin`/`manager`.
+
 ### 🔧 Known Issues / Follow-ups
 - [ ] Data Quality: High number of lots with `NULL` expiry dates impact FEFO accuracy. Requires process change at inbound.
 - [ ] Data Quality: 15 SKUs have zero unit cost, affecting valuation and ROP calculations.

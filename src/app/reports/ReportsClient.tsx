@@ -558,7 +558,7 @@ export function ReportsPageContent() {
   }
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">

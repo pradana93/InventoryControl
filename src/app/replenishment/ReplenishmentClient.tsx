@@ -7,7 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Loader2, AlertCircle, Download, ArrowUpDown } from 'lucide-react';
+import { EmptyState } from '@/components/common/EmptyState';
+import { Loader2, AlertCircle, Download, ArrowUpDown, CheckCircle2 } from 'lucide-react';
 import { useEntity } from '@/hooks/useEntity';
 import * as XLSX from 'xlsx';
 import { CalculatorResult } from '@/lib/inventory-calculator';
@@ -182,7 +183,7 @@ export function ReplenishmentPageContent() {
   const totalSaranValue = items.reduce((sum, i) => sum + i.saranValue, 0);
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold">Pusat Tindakan Pengisian Ulang</h1>
@@ -265,11 +266,11 @@ export function ReplenishmentPageContent() {
         </CardHeader>
         <CardContent className="p-4">
           {items.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              <ArrowUpDown className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p className="text-lg">Tidak ada item yang memerlukan pengisian ulang</p>
-              <p className="text-sm mt-1">Semua stok dalam kondisi aman</p>
-            </div>
+            <EmptyState
+              title="Tidak ada item yang memerlukan pengisian ulang"
+              description="Semua stok dalam kondisi aman. Tidak ada SKU yang berada di bawah ROP atau berstatus KRITIS saat ini."
+              icon={CheckCircle2}
+            />
           ) : (
             <div className="overflow-x-auto">
               <Table>

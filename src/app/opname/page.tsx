@@ -187,7 +187,7 @@ function StockOpnamePageContent() {
   }, [tab, priorityQueue, data, search]);
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
       <div className="flex justify-between items-center flex-wrap gap-2">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Stock Opname (Cycle Count)</h1>
