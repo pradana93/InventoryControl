@@ -209,10 +209,91 @@ export async function getSKUByName(namaBarang: string): Promise<CatalogEntry | n
   };
 }
 
-/**
- * Seed unit cost from Excel data (BBB and BBT Inventory Calculator)
- * This populates the catalog.unit_cost column with actual unit costs.
- */
+// ----------------------------------------------------------------------------
+// CATALOG WRITE OPERATIONS (Master Data Management)
+// ----------------------------------------------------------------------------
+
+export interface CatalogInput {
+  skuId: string;
+  namaBarang: string;
+  satuan: string;
+  kategori: string;
+  entitas: 'BBB' | 'BBT';
+  barcode?: string;
+  unitCost?: number;
+  leadTimeDays?: number;
+  safetyStockDays?: number;
+  status?: string;
+  activeFlag?: boolean;
+}
+
+/** Map a CatalogEntry/input into the snake_case DB row shape. */
+function toCatalogRow(entry: Partial<CatalogInput>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  if (entry.skuId !== undefined) row.sku_id = entry.skuId;
+  if (entry.namaBarang !== undefined) row.nama_barang = entry.namaBarang;
+  if (entry.satuan !== undefined) row.satuan = entry.satuan;
+  if (entry.kategori !== undefined) row.kategori = entry.kategori;
+  if (entry.entitas !== undefined) row.entitas = entry.entitas;
+  if (entry.barcode !== undefined) row.barcode = entry.barcode;
+  if (entry.unitCost !== undefined) row.unit_cost = entry.unitCost;
+  if (entry.leadTimeDays !== undefined) row.lead_time_days = entry.leadTimeDays;
+  if (entry.safetyStockDays !== undefined) row.safety_stock_days = entry.safetyStockDays;
+  if (entry.status !== undefined) row.status = entry.status;
+  if (entry.activeFlag !== undefined) row.activeflag = entry.activeFlag;
+  return row;
+}
+
+export async function createCatalogEntry(entry: CatalogInput): Promise<CatalogEntry> {
+  if (!entry.skuId || !entry.namaBarang) {
+    throw new Error('SKU ID dan Nama Barang wajib diisi');
+  }
+  const row = {
+    sku_id: entry.skuId,
+    nama_barang: entry.namaBarang,
+    satuan: entry.satuan || 'Pcs',
+    kategori: entry.kategori || 'General',
+    entitas: entry.entitas,
+    barcode: entry.barcode || '',
+    unit_cost: entry.unitCost ?? 0,
+    lead_time_days: entry.leadTimeDays ?? 3,
+    safety_stock_days: entry.safetyStockDays ?? 3,
+    status: entry.status || 'Active',
+    activeFlag: entry.activeFlag ?? true,
+  };
+  const { error } = await supabaseAdmin.from('catalog').insert(row);
+  if (error) throw new Error(`[catalog] ${error.message}`);
+  const created = await getSKUById(entry.skuId);
+  if (!created) throw new Error('Gagal membuat SKU');
+  return created;
+}
+
+export async function updateCatalogEntry(
+  skuId: string,
+  updates: Partial<Omit<CatalogInput, 'skuId'>>
+): Promise<CatalogEntry> {
+  const patch = toCatalogRow(updates);
+  if (Object.keys(patch).length === 0) {
+    throw new Error('Tidak ada perubahan untuk disimpan');
+  }
+  const { error } = await supabaseAdmin
+    .from('catalog')
+    .update(patch)
+    .eq('sku_id', skuId);
+  if (error) throw new Error(`[catalog] ${error.message}`);
+  const updated = await getSKUById(skuId);
+  if (!updated) throw new Error('SKU tidak ditemukan setelah pembaruan');
+  return updated;
+}
+
+export async function deleteCatalogEntry(skuId: string): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from('catalog')
+    .delete()
+    .eq('sku_id', skuId);
+  if (error) throw new Error(`[catalog] ${error.message}`);
+}
+
 export async function seedUnitCost(): Promise<{ updated: number; errors: string[] }> {
   // Unit cost data extracted from the Excel files
   const unitCostData: Record<string, number> = {
