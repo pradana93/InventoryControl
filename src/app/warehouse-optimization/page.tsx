@@ -10,6 +10,11 @@ const SkuLifecycleClient = dynamic(
   { ssr: false, loading: () => <div className="flex justify-center items-center h-64"><Loader2 className="animate-spin" /></div> }
 );
 
+const SlottingClient = dynamic(
+  () => import('./slotting/SlottingClient').then((mod) => mod.SlottingPageContent),
+  { ssr: false, loading: () => <div className="flex justify-center items-center h-64"><Loader2 className="animate-spin" /></div> }
+);
+
 export default function WarehouseOptimizationPage() {
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -17,10 +22,13 @@ export default function WarehouseOptimizationPage() {
       <Tabs defaultValue="sku-lifecycle">
         <TabsList>
           <TabsTrigger value="sku-lifecycle">Manajemen Siklus SKU</TabsTrigger>
-          <TabsTrigger value="slotting-optimizer" disabled>Optimasi Slotting</TabsTrigger>
+          <TabsTrigger value="slotting-optimizer">Optimasi Slotting</TabsTrigger>
         </TabsList>
         <TabsContent value="sku-lifecycle">
           <Suspense fallback={<Loader2 className="animate-spin" />}><SkuLifecycleClient /></Suspense>
+        </TabsContent>
+        <TabsContent value="slotting-optimizer">
+          <Suspense fallback={<Loader2 className="animate-spin" />}><SlottingClient /></Suspense>
         </TabsContent>
       </Tabs>
     </div>
