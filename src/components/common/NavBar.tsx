@@ -19,6 +19,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ShieldAlert,
+  ShieldCheck,
   Calculator,
   AlertTriangle,
   BarChart2
@@ -85,6 +86,7 @@ export function NavBar() {
     { href: '/calculator-settings', icon: ShieldAlert, label: 'Pengaturan Kalkulator', roles: ['super-admin', 'manager'] },
     { href: '/replenishment', icon: AlertTriangle, label: 'Pusat Tindakan', roles: ['super-admin', 'manager', 'operator'] },
     { href: '/reports', icon: BarChart2, label: 'Laporan Persediaan', roles: ['super-admin', 'manager'] },
+    { href: '/audit', icon: ShieldCheck, label: 'Audit & Kepatuhan', roles: ['super-admin', 'manager'] },
     { href: '/users', icon: Users, label: 'Pengguna', roles: ['super-admin'] },
   ].filter((item) => !role || item.roles.includes(role));
 
