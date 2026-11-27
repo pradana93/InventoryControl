@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 
 export async function PATCH(
   request: Request,
-  { params }: { params: { skuId: string } }
+  { params }: { params: Promise<{ skuId: string }> }
 ) {
   try {
     const session = await auth();
@@ -24,7 +24,7 @@ export async function PATCH(
       );
     }
 
-    const { skuId } = params;
+    const { skuId } = await params;
     const body = await request.json();
     const { activeFlag } = body;
 
