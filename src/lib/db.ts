@@ -132,22 +132,26 @@ export interface CatalogEntry {
   unitCost: number;
   leadTimeDays: number;
   safetyStockDays: number;
+  activeFlag?: boolean;
 }
 
-export async function getCatalog(): Promise<CatalogEntry[]> {
+export async function getCatalog(options?: { entity?: EntityFilter }): Promise<CatalogEntry[]> {
   const rows = await selectAll<any>('catalog', '*');
-  return rows.map((r) => ({
-    skuId: _str(r.sku_id),
-    namaBarang: _str(r.nama_barang),
-    satuan: _str(r.satuan) || 'Pcs',
-    kategori: _str(r.kategori) || 'General',
-    status: _str(r.status) || 'Active',
-    entitas: _entity(r.entitas),
-    barcode: _str(r.barcode),
-    unitCost: _num(r.unit_cost),
-    leadTimeDays: _numOr(r.lead_time_days, 3),
-    safetyStockDays: _numOr(r.safety_stock_days, 3),
-  }));
+  return rows
+    .filter(r => options?.entity === 'ALL' || r.entitas === options?.entity)
+    .map((r) => ({
+      skuId: _str(r.sku_id),
+      namaBarang: _str(r.nama_barang),
+      satuan: _str(r.satuan) || 'Pcs',
+      kategori: _str(r.kategori) || 'General',
+      status: _str(r.status) || 'Active',
+      entitas: _entity(r.entitas),
+      barcode: _str(r.barcode),
+      unitCost: _num(r.unit_cost),
+      leadTimeDays: _numOr(r.lead_time_days, 3),
+      safetyStockDays: _numOr(r.safety_stock_days, 3),
+      activeFlag: r.activeFlag ?? r.activeflag ?? true,
+    }));
 }
 
 export async function getSKUNames(): Promise<string[]> {
@@ -177,6 +181,7 @@ export async function getSKUById(skuId: string): Promise<CatalogEntry | null> {
     unitCost: _num(data.unit_cost),
     leadTimeDays: _numOr(data.lead_time_days, 3),
     safetyStockDays: _numOr(data.safety_stock_days, 3),
+    activeFlag: data.activeFlag ?? data.activeflag ?? true,
   };
 }
 
@@ -199,6 +204,7 @@ export async function getSKUByName(namaBarang: string): Promise<CatalogEntry | n
     unitCost: _num(data.unit_cost),
     leadTimeDays: _numOr(data.lead_time_days, 3),
     safetyStockDays: _numOr(data.safety_stock_days, 3),
+    activeFlag: data.activeFlag ?? data.activeflag ?? true,
   };
 }
 
