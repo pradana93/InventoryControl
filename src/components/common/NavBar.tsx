@@ -81,6 +81,7 @@ export function NavBar() {
     { href: '/opname', icon: ClipboardCheck, label: 'Stock Opname', roles: ['super-admin', 'manager', 'operator'] },
     { href: '/labels', icon: QrCode, label: 'Label Rak', roles: ['super-admin', 'manager'] },
     { href: '/calculator', icon: Calculator, label: 'Kalkulator Persediaan', roles: ['super-admin', 'manager'] },
+    { href: '/warehouse-optimization', icon: LayoutDashboard, label: 'Optimalisasi Gudang', roles: ['super-admin', 'manager'] },
     { href: '/calculator-settings', icon: ShieldAlert, label: 'Pengaturan Kalkulator', roles: ['super-admin', 'manager'] },
     { href: '/replenishment', icon: AlertTriangle, label: 'Pusat Tindakan', roles: ['super-admin', 'manager', 'operator'] },
     { href: '/reports', icon: BarChart2, label: 'Laporan Persediaan', roles: ['super-admin', 'manager'] },
