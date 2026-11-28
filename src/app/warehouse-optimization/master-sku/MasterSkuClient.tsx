@@ -35,6 +35,10 @@ import {
   CheckCircle2,
   PackageSearch,
   Download,
+  Upload,
+  FileSpreadsheet,
+  AlertTriangle,
+  CheckCircle,
 } from 'lucide-react';
 import { useEntity } from '@/hooks/useEntity';
 import { filterActiveSkus } from '@/lib/warehouse-optimization';
@@ -85,6 +89,108 @@ export interface SkuFormDraft {
   leadTimeDays: number;
   safetyStockDays: number;
   activeFlag: boolean;
+}
+
+/** A parsed row from an import file, with client-side validation status. */
+export interface ImportPreviewRow {
+  row: number;
+  skuId: string;
+  namaBarang: string;
+  entitas: 'BBB' | 'BBT';
+  satuan: string;
+  kategori: string;
+  barcode: string;
+  unitCost: number;
+  leadTimeDays: number;
+  safetyStockDays: number;
+  activeFlag: boolean;
+  valid: boolean;
+  error?: string;
+}
+
+/**
+ * Column headers shared by the Export, Template, and Import files. Keeping a
+ * single source of truth means an exported file can be re-imported unchanged.
+ */
+export const SKU_EXPORT_HEADERS = [
+  'SKU ID',
+  'Nama Barang',
+  'Entitas',
+  'Satuan',
+  'Kategori',
+  'Barcode',
+  'Harga Satuan (Rp)',
+  'Lead Time (hari)',
+  'Safety Stock (hari)',
+  'Status',
+  'Stok',
+  'Nilai (Rp)',
+] as const;
+
+/**
+ * Parse a sheet (array of arrays) into import preview rows, validating each.
+ * Pure and exported for testing. Row indexes are 1-based including the header.
+ */
+export function parseSkuImportRows(data: unknown[][]): {
+  rows: ImportPreviewRow[];
+  error?: string;
+} {
+  if (data.length < 2) {
+    return { rows: [], error: 'File kosong atau hanya berisi header' };
+  }
+
+  const headers = (data[0] as unknown[]).map((c) => String(c ?? '').trim());
+  const col = (name: string) => headers.findIndex((h) => h === name);
+  const idxSku = col('SKU ID');
+  const idxNama = col('Nama Barang');
+
+  if (idxSku < 0 || idxNama < 0) {
+    return { rows: [], error: 'Header tidak valid. Kolom "SKU ID" dan "Nama Barang" wajib ada.' };
+  }
+
+  const pick = (row: unknown[], name: string): string => {
+    const i = col(name);
+    return i >= 0 ? String(row[i] ?? '').trim() : '';
+  };
+
+  const rows: ImportPreviewRow[] = [];
+  for (let i = 1; i < data.length; i++) {
+    const raw = data[i] as unknown[];
+    const skuId = pick(raw, 'SKU ID');
+    if (!skuId) continue;
+
+    const ent = pick(raw, 'Entitas').toUpperCase();
+    const statusStr = pick(raw, 'Status').toLowerCase();
+    const row: ImportPreviewRow = {
+      row: i + 1,
+      skuId,
+      namaBarang: pick(raw, 'Nama Barang'),
+      entitas: ent === 'BBT' ? 'BBT' : 'BBB',
+      satuan: pick(raw, 'Satuan') || 'Pcs',
+      kategori: pick(raw, 'Kategori') || 'General',
+      barcode: pick(raw, 'Barcode'),
+      unitCost: Number(pick(raw, 'Harga Satuan (Rp)').replace(/[^\d.-]/g, '')) || 0,
+      leadTimeDays: Math.max(0, Number(pick(raw, 'Lead Time (hari)')) || 3),
+      safetyStockDays: Math.max(0, Number(pick(raw, 'Safety Stock (hari)')) || 3),
+      activeFlag:
+        statusStr !== 'nonaktif' &&
+        statusStr !== 'inactive' &&
+        statusStr !== 'false' &&
+        statusStr !== '0',
+      valid: true,
+    };
+
+    const problems: string[] = [];
+    if (!row.namaBarang) problems.push('Nama Barang kosong');
+    if (row.unitCost < 0) problems.push('Harga satuan negatif');
+    if (problems.length > 0) {
+      row.valid = false;
+      row.error = problems.join('; ');
+    }
+    rows.push(row);
+  }
+
+  return { rows };
 }
 
 /**
@@ -156,6 +262,12 @@ export function MasterSkuPageContent() {
   const [editingSkuId, setEditingSkuId] = useState<string | null>(null);
   const [draft, setDraft] = useState<SkuFormDraft>(emptySkuDraft('BBB'));
   const [deleteTarget, setDeleteTarget] = useState<MasterSkuItem | null>(null);
+
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreview, setImportPreview] = useState<ImportPreviewRow[] | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const userRole = (session?.user as any)?.role as string | undefined;
   const canEdit = userRole === 'super-admin' || userRole === 'manager';
@@ -309,24 +421,8 @@ export function MasterSkuPageContent() {
 
   const handleExport = async () => {
     const XLSX = await import('xlsx');
-    const header = [
-      'SKU ID',
-      'Nama Barang',
-      'Entitas',
-      'Satuan',
-      'Kategori',
-      'Barcode',
-      'Harga Satuan (Rp)',
-      'Lead Time (hari)',
-      'Safety Stock (hari)',
-      'Status',
-      'Stok',
-      'Nilai (Rp)',
-    ];
+    const header = [...SKU_EXPORT_HEADERS];
     const aoa: (string | number)[][] = [
-      ['MASTER DATA SKU — OPTIMALISASI GUDANG'],
-      ['Entitas:', entity, '', 'Diekspor:', new Date().toLocaleString('id-ID')],
-      [],
       header,
       ...filtered.map((i) => [
         i.skuId,
@@ -361,6 +457,101 @@ export function MasterSkuPageContent() {
     URL.revokeObjectURL(url);
   };
 
+  const downloadBlob = (buf: ArrayBuffer, filename: string) => {
+    const blob = new Blob([buf], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadTemplate = async () => {
+    const XLSX = await import('xlsx');
+    const header = [...SKU_EXPORT_HEADERS];
+    const sample: (string | number)[][] = [
+      header,
+      ['BBB-001', 'Contoh Produk 1', 'BBB', 'Pcs', 'Makanan', '', 25000, 3, 5, 'Aktif', '', ''],
+      ['BBT-001', 'Contoh Produk 2', 'BBT', 'Box', 'Minuman', '', 150000, 5, 7, 'Aktif', '', ''],
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(sample);
+    ws['!cols'] = header.map((h) => ({ wch: Math.max(14, h.length + 2) }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Template');
+    const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
+    downloadBlob(buf, `Template-Import-Master-SKU-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  const resetImport = () => {
+    setImportFile(null);
+    setImportPreview(null);
+    const fileInput = document.getElementById('import-file-input') as HTMLInputElement | null;
+    if (fileInput) fileInput.value = '';
+  };
+
+  const handleImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.match(/\.(xlsx|xls)$/i)) {
+      setError('Format file tidak didukung. Gunakan .xlsx atau .xls');
+      return;
+    }
+
+    setImportFile(file);
+    setError(null);
+    try {
+      const XLSX = await import('xlsx');
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array' });
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' }) as unknown[][];
+
+      const { rows, error: parseError } = parseSkuImportRows(jsonData);
+      if (parseError) {
+        setError(parseError);
+        setImportPreview(null);
+        return;
+      }
+      setImportPreview(rows);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gagal membaca file Excel');
+      setImportPreview(null);
+    }
+  };
+
+  const handleImportConfirm = async () => {
+    if (!importFile) return;
+    setImporting(true);
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', importFile);
+      formData.append('entity', entity);
+
+      const res = await fetch('/api/catalog/import', { method: 'POST', body: formData });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Gagal mengimpor data');
+
+      setImportDialogOpen(false);
+      resetImport();
+      await loadData();
+      setNotice(
+        `Import berhasil: ${json.created} dibuat, ${json.updated} diperbarui` +
+          (json.errors?.length ? `, ${json.errors.length} gagal` : '')
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gagal mengimpor data');
+    } finally {
+      setImporting(false);
+    }
+  };
+
   if (status === 'loading' || (status === 'authenticated' && loading)) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -384,9 +575,17 @@ export function MasterSkuPageContent() {
             <Download className="h-4 w-4 mr-2" /> Export Excel
           </Button>
           {canEdit && (
-            <Button size="sm" onClick={openCreate}>
-              <Plus className="h-4 w-4 mr-2" /> Tambah SKU
-            </Button>
+            <>
+              <Button variant="outline" size="sm" onClick={handleDownloadTemplate}>
+                <FileSpreadsheet className="h-4 w-4 mr-2" /> Template
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setImportDialogOpen(true)}>
+                <Upload className="h-4 w-4 mr-2" /> Import Excel
+              </Button>
+              <Button size="sm" onClick={openCreate}>
+                <Plus className="h-4 w-4 mr-2" /> Tambah SKU
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -395,9 +594,14 @@ export function MasterSkuPageContent() {
         <div className="flex items-center gap-2 p-4 bg-destructive/10 text-destructive rounded-lg border border-destructive/20">
           <AlertCircle className="h-5 w-5 flex-shrink-0" />
           <span className="flex-1">{error}</span>
-          <button onClick={() => setError(null)} className="text-xs underline">
-            Tutup
-          </button>
+          <button onClick={() => setError(null)} className="text-xs underline">Tutup</button>
+        </div>
+      )}
+      {notice && (
+        <div className="flex items-center gap-2 p-4 bg-emerald-500/10 text-emerald-400 rounded-lg border border-emerald-500/20">
+          <CheckCircle className="h-5 w-5 flex-shrink-0" />
+          <span className="flex-1">{notice}</span>
+          <button onClick={() => setNotice(null)} className="text-xs underline">Tutup</button>
         </div>
       )}
 
@@ -722,6 +926,92 @@ export function MasterSkuPageContent() {
             <Button variant="destructive" onClick={handleDelete} disabled={saving}>
               {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Hapus SKU
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* IMPORT EXCEL DIALOG */}
+      <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
+        <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>Import Master SKU dari Excel</DialogTitle>
+            <DialogDescription>
+              Unggah file Excel (.xlsx/.xls). Data akan di-upsert (SKU baru dibuat, SKU existing diperbarui).
+              Unduh "Template" terlebih dahulu untuk melihat format standar.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col h-[60vh] p-4 space-y-4">
+            <div className="border-2 border-dashed border-border rounded-lg p-6 text-center">
+              <input
+                id="import-file-input"
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={handleImportFileChange}
+                className="hidden"
+                disabled={importing}
+              />
+              <label htmlFor="import-file-input" className="cursor-pointer flex flex-col items-center gap-2">
+                <FileSpreadsheet className="h-12 w-12 text-muted-foreground" />
+                <div>
+                  <p className="font-medium">Klik atau tarik file Excel ke sini</p>
+                  <p className="text-sm text-muted-foreground">Format: .xlsx atau .xls (maks 10MB)</p>
+                </div>
+              </label>
+              {importFile && (
+                <p className="text-sm text-emerald-400 mt-2">
+                  File dipilih: <strong>{importFile.name}</strong>
+                </p>
+              )}
+            </div>
+
+            {/* Preview Table */}
+            {importPreview !== null && (
+              <div className="flex-1 overflow-auto border border-border rounded-lg">
+                <div className="sticky top-0 bg-background/95 backdrop-blur-sm border-b border-border p-3 flex items-center justify-between">
+                  <p className="font-medium">Pratinjau ({importPreview.length} baris)</p>
+                </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Row</TableHead>
+                      <TableHead>SKU ID</TableHead>
+                      <TableHead>Barang</TableHead>
+                      <TableHead>Valid</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {importPreview.map((item) => (
+                      <TableRow key={item.row} className={!item.valid ? 'bg-destructive/5' : ''}>
+                        <TableCell>{item.row}</TableCell>
+                        <TableCell className="font-mono">{item.skuId}</TableCell>
+                        <TableCell>{item.namaBarang}</TableCell>
+                        <TableCell>
+                          {item.valid ? (
+                            <CheckCircle className="h-4 w-4 text-emerald-400" />
+                          ) : (
+                            <span className="text-destructive">
+                              <AlertTriangle className="h-4 w-4" />
+                            </span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImportDialogOpen(false)} disabled={importing}>
+              Batal
+            </Button>
+            <Button
+              onClick={handleImportConfirm}
+              disabled={importing || !importPreview || importPreview.some((r) => !r.valid)}
+            >
+              {importing && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Import Data
             </Button>
           </DialogFooter>
         </DialogContent>

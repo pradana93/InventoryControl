@@ -294,6 +294,81 @@ export async function deleteCatalogEntry(skuId: string): Promise<void> {
   if (error) throw new Error(`[catalog] ${error.message}`);
 }
 
+// ----------------------------------------------------------------------------
+// BULK OPERATIONS (Import / Export)
+// ----------------------------------------------------------------------------
+
+export interface BulkUpsertResult {
+  created: number;
+  updated: number;
+  errors: Array<{ row: number; skuId: string; error: string }>;
+}
+
+/**
+ * Bulk upsert catalog entries. Existing SKUs (matched by sku_id) are updated,
+ * new SKUs are created. Falls back to per-row operations when the batched
+ * upsert fails, so callers still get precise error reporting.
+ */
+export async function bulkUpsertCatalog(
+  entries: CatalogInput[]
+): Promise<BulkUpsertResult> {
+  const result: BulkUpsertResult = { created: 0, updated: 0, errors: [] };
+  if (entries.length === 0) return result;
+
+  const skuIds = entries.map((e) => e.skuId);
+  const existing = await supabaseAdmin
+    .from('catalog')
+    .select('sku_id')
+    .in('sku_id', skuIds);
+  const existingSet = new Set((existing.data || []).map((r) => r.sku_id));
+
+  const rows = entries.map((entry) => ({
+    sku_id: entry.skuId,
+    nama_barang: entry.namaBarang,
+    satuan: entry.satuan || 'Pcs',
+    kategori: entry.kategori || 'General',
+    entitas: entry.entitas,
+    barcode: entry.barcode || '',
+    unit_cost: entry.unitCost ?? 0,
+    lead_time_days: entry.leadTimeDays ?? 3,
+    safety_stock_days: entry.safetyStockDays ?? 3,
+    status: entry.status || 'Active',
+    activeflag: entry.activeFlag ?? true,
+  }));
+
+  const { error } = await supabaseAdmin
+    .from('catalog')
+    .upsert(rows, { onConflict: 'sku_id', ignoreDuplicates: false });
+
+  if (error) {
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      try {
+        if (existingSet.has(entry.skuId)) {
+          await updateCatalogEntry(entry.skuId, entry);
+          result.updated++;
+        } else {
+          await createCatalogEntry(entry);
+          result.created++;
+        }
+      } catch (err) {
+        result.errors.push({
+          row: i + 1,
+          skuId: entry.skuId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    return result;
+  }
+
+  for (const entry of entries) {
+    if (existingSet.has(entry.skuId)) result.updated++;
+    else result.created++;
+  }
+  return result;
+}
+
 export async function seedUnitCost(): Promise<{ updated: number; errors: string[] }> {
   // Unit cost data extracted from the Excel files
   const unitCostData: Record<string, number> = {
